@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import { getPool } from "../db/pool";
 import { IS_PUBLIC_ROUTE } from "./public.decorator";
 
-function extractBearerToken(headerValue: string | string[] | undefined) {
+export function extractBearerToken(headerValue: string | string[] | undefined) {
   const header = Array.isArray(headerValue) ? headerValue[0] : headerValue;
   if (!header) {
     return null;
@@ -120,6 +120,41 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+type RouteAwareRequest = {
+  method?: unknown;
+  routerPath?: unknown;
+  routeOptions?: { url?: unknown };
+  url?: unknown;
+};
+
+const WORKSPACE_OPTIONAL_ROUTE_KEYS = new Set(["GET:/auth/session"]);
+
+export function resolveRouteKey(request: RouteAwareRequest) {
+  const method = typeof request.method === "string" ? request.method.toUpperCase() : "";
+  if (!method) {
+    return null;
+  }
+
+  const routerPath =
+    typeof request.routerPath === "string"
+      ? request.routerPath
+      : typeof request.routeOptions?.url === "string"
+        ? request.routeOptions.url
+        : typeof request.url === "string"
+          ? request.url.split("?")[0]
+          : "";
+  if (!routerPath) {
+    return null;
+  }
+
+  return `${method}:${routerPath}`;
+}
+
+export function isWorkspaceScopeOptionalRoute(request: RouteAwareRequest) {
+  const routeKey = resolveRouteKey(request);
+  return routeKey ? WORKSPACE_OPTIONAL_ROUTE_KEYS.has(routeKey) : false;
+}
+
 export function buildSessionTokenLookupCandidates(token: string) {
   const sha256 = createHash("sha256").update(token).digest();
   return Array.from(
@@ -147,6 +182,10 @@ export class SessionAuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<{
       headers: Record<string, string | string[] | undefined>;
+      method?: string;
+      routerPath?: string;
+      routeOptions?: { url?: string };
+      url?: string;
       params?: Record<string, unknown>;
       body?: Record<string, unknown>;
       query?: Record<string, unknown>;
@@ -263,6 +302,9 @@ export class SessionAuthGuard implements CanActivate {
     const workspaceId = explicitWorkspaceId ?? derivedWorkspaceId;
     if (hasScopedResourceId && !workspaceId) {
       throw new ForbiddenException("Workspace access denied");
+    }
+    if (!workspaceId && !hasScopedResourceId && !isWorkspaceScopeOptionalRoute(request)) {
+      throw new ForbiddenException("Workspace ID is required");
     }
 
     if (workspaceId) {

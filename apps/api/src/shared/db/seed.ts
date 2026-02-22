@@ -38,6 +38,66 @@ async function main() {
     [workspaceResult.rows[0].id, userResult.rows[0].id]
   );
 
+  await pool.query(
+    `
+      INSERT INTO prompt_templates (
+        workspace_id,
+        name,
+        content_type,
+        system_prompt,
+        user_prompt_template,
+        prompt_config,
+        is_active
+      )
+      VALUES
+        (
+          $1,
+          'default-tweet',
+          'tweet',
+          'Write concise, practical Turkish posts with clear value.',
+          'Türkçe tweet yaz. Konu: {{topic}}. Stil: {{style}}. Ek talimat: {{prompt_input}}.',
+          '{"maxChars": 280}'::jsonb,
+          true
+        ),
+        (
+          $1,
+          'default-thread',
+          'thread',
+          'Write structured 4-part Turkish threads with clear progression.',
+          '4 parçalı thread yaz. Konu: {{topic}}. Stil: {{style}}. Ek talimat: {{prompt_input}}.',
+          '{"parts": 4}'::jsonb,
+          true
+        ),
+        (
+          $1,
+          'default-reply',
+          'reply',
+          'Write helpful and non-confrontational Turkish replies.',
+          'Yapıcı bir reply yaz. Konu/bağlam: {{topic}}. Stil: {{style}}. Ek talimat: {{prompt_input}}.',
+          '{"tone":"helpful"}'::jsonb,
+          true
+        ),
+        (
+          $1,
+          'default-quote',
+          'quote',
+          'Write sharp Turkish quote-post commentary without misinformation.',
+          'Quote tweet yorumu yaz. Konu/bağlam: {{topic}}. Stil: {{style}}. Ek talimat: {{prompt_input}}.',
+          '{"tone":"insightful"}'::jsonb,
+          true
+        )
+      ON CONFLICT (workspace_id, name)
+      DO UPDATE SET
+        content_type = EXCLUDED.content_type,
+        system_prompt = EXCLUDED.system_prompt,
+        user_prompt_template = EXCLUDED.user_prompt_template,
+        prompt_config = EXCLUDED.prompt_config,
+        is_active = EXCLUDED.is_active,
+        updated_at = now();
+    `,
+    [workspaceResult.rows[0].id]
+  );
+
   Logger.log("Seed complete: founder@example.com / Personal Workspace", "DBSeed");
   await closePool();
 }

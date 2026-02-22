@@ -67,7 +67,7 @@ function toWebHeaders(headersObject: FastifyRequest["headers"]) {
   return headers;
 }
 
-function buildCookieValue(sessionToken: string) {
+export function buildCookieValue(sessionToken: string) {
   const cookieParts = [
     `session_token=${encodeURIComponent(sessionToken)}`,
     "Path=/",
@@ -104,7 +104,7 @@ export function resolveRedirectOrigins() {
   return resolveAppOrigins(process.env.APP_URL, LOCAL_REDIRECT_ORIGINS);
 }
 
-function resolveSafeRedirectTarget(rawTarget?: string) {
+export function resolveSafeRedirectTarget(rawTarget?: string) {
   if (!rawTarget) {
     return null;
   }

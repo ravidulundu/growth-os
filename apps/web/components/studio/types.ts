@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 
-export type ContentMode = "tweet" | "thread";
+export type ContentMode = "tweet" | "thread" | "reply" | "quote";
 export type StudioView =
   | "dashboard"
   | "generator"

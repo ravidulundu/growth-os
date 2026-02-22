@@ -102,6 +102,8 @@ export function GeneratorView({ controller }: GeneratorViewProps) {
               >
                 <option value="tweet">Tweet</option>
                 <option value="thread">Thread</option>
+                <option value="reply">Reply</option>
+                <option value="quote">Quote</option>
               </Select>
             </div>
             <div>
@@ -111,6 +113,15 @@ export function GeneratorView({ controller }: GeneratorViewProps) {
                 value={controller.topic}
                 onChange={(event) => controller.setTopic(event.target.value)}
                 placeholder="First hour retention hooks"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <Label htmlFor="template-name">Template name (optional)</Label>
+              <Input
+                id="template-name"
+                value={controller.templateName}
+                onChange={(event) => controller.setTemplateName(event.target.value)}
+                placeholder="default-tweet"
               />
             </div>
           </div>

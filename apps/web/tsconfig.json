@@ -4,7 +4,7 @@
     "jsx": "preserve",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "allowJs": true,
+    "allowJs": false,
     "noEmit": true,
     "incremental": true,
     "plugins": [

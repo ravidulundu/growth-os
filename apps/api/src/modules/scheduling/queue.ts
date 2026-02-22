@@ -35,3 +35,27 @@ export function getMetricsQueue() {
 
   return metricsQueue;
 }
+
+export async function closeSchedulingQueues() {
+  const closeActions: Array<Promise<unknown>> = [];
+
+  if (publishQueue) {
+    closeActions.push(publishQueue.close());
+    publishQueue = undefined;
+  }
+
+  if (metricsQueue) {
+    closeActions.push(metricsQueue.close());
+    metricsQueue = undefined;
+  }
+
+  if (redisConnection) {
+    const activeConnection = redisConnection;
+    closeActions.push(activeConnection.quit().catch(() => activeConnection.disconnect()));
+    redisConnection = undefined;
+  }
+
+  if (closeActions.length > 0) {
+    await Promise.all(closeActions);
+  }
+}

@@ -11,7 +11,22 @@ test("generation.buildGeneratedText.styleConstraints.unit", () => {
       hashtagRatio: 0.3,
       emojiRatio: 0.1,
       ctaRatio: 0.4,
-      preferredTone: "concise"
+      preferredTone: "concise",
+      preferredFormat: "single",
+      languageRegister: "neutral",
+      humorSarcasmScore: 0.1,
+      vocabulary: ["ttfv", "optimizasyon"],
+      hookPatterns: [],
+      doList: [],
+      dontList: [],
+      ctaPatterns: [],
+      brandSafetyNotes: [],
+      sentenceRhythm: {
+        avgSentenceLength: 8,
+        shortSentenceRatio: 0.7,
+        mediumSentenceRatio: 0.3,
+        longSentenceRatio: 0
+      }
     }
   });
 

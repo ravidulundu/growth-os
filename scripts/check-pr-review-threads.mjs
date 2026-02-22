@@ -35,13 +35,9 @@ function parseRepoFromOrigin(originUrl) {
   return null;
 }
 
-if ((process.env.SKIP_PR_REVIEW_CHECK ?? "").trim().toLowerCase() === "true") {
-  process.exit(0);
-}
-
 if (!tryRun("gh", ["auth", "status"])) {
-  writeLine("[pr:review-check] gh auth is unavailable, skipping unresolved-thread guard.");
-  process.exit(0);
+  writeLine("[pr:review-check] gh auth is unavailable; cannot verify unresolved review threads.");
+  process.exit(1);
 }
 
 const prNumber = tryRun("gh", ["pr", "view", "--json", "number", "--jq", ".number"]);
@@ -62,10 +58,10 @@ if (!repo) {
 }
 
 const query = `
-  query($owner:String!, $repo:String!, $number:Int!) {
+  query($owner:String!, $repo:String!, $number:Int!, $cursor:String) {
     repository(owner:$owner, name:$repo) {
       pullRequest(number:$number) {
-        reviewThreads(first:100) {
+        reviewThreads(first:100, after:$cursor) {
           nodes {
             isResolved
             path
@@ -76,32 +72,60 @@ const query = `
               }
             }
           }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
         }
       }
     }
   }
 `;
 
-const responseJson = tryRun("gh", [
-  "api",
-  "graphql",
-  "-f",
-  `query=${query}`,
-  "-F",
-  `owner=${repo.owner}`,
-  "-F",
-  `repo=${repo.repo}`,
-  "-F",
-  `number=${prNumber}`
-]);
+const threads = [];
+let cursor = null;
+while (true) {
+  const args = [
+    "api",
+    "graphql",
+    "-f",
+    `query=${query}`,
+    "-F",
+    `owner=${repo.owner}`,
+    "-F",
+    `repo=${repo.repo}`,
+    "-F",
+    `number=${prNumber}`
+  ];
+  if (cursor) {
+    args.push("-F", `cursor=${cursor}`);
+  }
 
-if (!responseJson) {
-  writeLine("[pr:review-check] Failed to fetch review threads via gh api.");
-  process.exit(1);
+  const responseJson = tryRun("gh", args);
+  if (!responseJson) {
+    writeLine("[pr:review-check] Failed to fetch review threads via gh api.");
+    process.exit(1);
+  }
+
+  const response = JSON.parse(responseJson);
+  const connection = response?.data?.repository?.pullRequest?.reviewThreads;
+  if (!connection || !Array.isArray(connection.nodes)) {
+    writeLine("[pr:review-check] Unexpected response from GitHub GraphQL API.");
+    process.exit(1);
+  }
+
+  threads.push(...connection.nodes);
+  if (!connection.pageInfo?.hasNextPage) {
+    break;
+  }
+
+  cursor = connection.pageInfo.endCursor ?? null;
+  if (!cursor) {
+    writeLine("[pr:review-check] GraphQL pagination cursor missing.");
+    process.exit(1);
+  }
 }
 
-const response = JSON.parse(responseJson);
-const threads = response?.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
 const unresolved = threads.filter((thread) => thread && thread.isResolved === false);
 
 if (unresolved.length === 0) {
@@ -120,7 +144,4 @@ for (const thread of unresolved.slice(0, 20)) {
   writeLine(`- ${reference}${typeof url === "string" ? ` (${url})` : ""}`);
 }
 writeLine("[pr:review-check] Resolve or question these threads before committing.");
-writeLine(
-  "[pr:review-check] Temporary bypass (not recommended): SKIP_PR_REVIEW_CHECK=true git commit ..."
-);
 process.exit(1);

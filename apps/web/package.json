@@ -6,7 +6,10 @@
     "build": "next build",
     "start": "sh -c 'next start -p ${WEB_PORT:-3000}'",
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/**/*.test.mjs"
+    "test": "pnpm run test:e2e",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:debug": "playwright test --debug"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.4",
@@ -20,6 +23,7 @@
     "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "@types/node": "22.10.1",
     "@types/react": "19.0.2",
     "@types/react-dom": "19.0.2",

@@ -151,6 +151,7 @@ export default function LoginPage() {
         <CardContent className="space-y-6">
           {notice ? (
             <div
+              data-testid="login-notice"
               className={
                 notice.tone === "error"
                   ? "rounded-lg border border-red-300 bg-red-100 px-3 py-2 text-sm text-red-700"
@@ -175,11 +176,16 @@ export default function LoginPage() {
                 id="email"
                 type="email"
                 autoComplete="email"
+                data-testid="login-email-input"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
               />
             </div>
-            <Button type="submit" disabled={requestDisabled}>
+            <Button
+              type="submit"
+              disabled={requestDisabled}
+              data-testid="request-magic-link-button"
+            >
               {activeAction !== null ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Request Magic Link
             </Button>

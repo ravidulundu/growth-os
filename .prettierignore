@@ -5,3 +5,4 @@ dist
 coverage
 pnpm-lock.yaml
 *.pdf
+deep-research-report*.md

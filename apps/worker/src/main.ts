@@ -10,6 +10,7 @@ import {
   type SchedulerState
 } from "@growth-os/shared";
 import { Pool } from "pg";
+import { assertSupportedXClientMode } from "./runtime-policy";
 
 config();
 
@@ -18,6 +19,18 @@ const databaseUrl =
 const publishQueueName = "publish-jobs";
 const metricsQueueName = "metrics-jobs";
 const logger = createLogger("worker");
+
+function envInt(name: string, fallback: number, min = 1) {
+  const raw = process.env[name]?.trim();
+  if (!raw) {
+    return fallback;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < min) {
+    return fallback;
+  }
+  return Math.floor(parsed);
+}
 
 function getRedisUrl() {
   return process.env.REDIS_URL ?? "redis://localhost:56379";
@@ -34,22 +47,7 @@ function sanitizeRedisUrl(rawUrl: string) {
   }
 }
 
-function xClientMode() {
-  return (process.env.X_CLIENT_MODE ?? "mock").trim().toLowerCase();
-}
-
-function assertSupportedXClientMode() {
-  const mode = xClientMode();
-  const nodeEnv = process.env.NODE_ENV?.trim().toLowerCase();
-  if (nodeEnv === "production" && mode === "mock") {
-    throw new Error("X_CLIENT_MODE=mock is not allowed in production worker.");
-  }
-  if (mode !== "mock") {
-    throw new Error(`Unsupported worker X client mode: ${mode}`);
-  }
-}
-
-assertSupportedXClientMode();
+assertSupportedXClientMode({ nodeEnv: process.env.NODE_ENV, mode: process.env.X_CLIENT_MODE });
 
 function redisConnectionOptions() {
   const rawUrl = getRedisUrl();
@@ -79,7 +77,12 @@ function redisConnectionOptions() {
   return options;
 }
 
-const dbPool = new Pool({ connectionString: databaseUrl });
+const dbPool = new Pool({
+  connectionString: databaseUrl,
+  max: envInt("PG_POOL_MAX", 12),
+  idleTimeoutMillis: envInt("PG_POOL_IDLE_TIMEOUT_MS", 30_000),
+  connectionTimeoutMillis: envInt("PG_POOL_CONNECTION_TIMEOUT_MS", 10_000)
+});
 const publishQueue = new Queue(publishQueueName, { connection: redisConnectionOptions() });
 const metricsQueue = new Queue(metricsQueueName, { connection: redisConnectionOptions() });
 

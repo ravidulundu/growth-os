@@ -23,7 +23,10 @@ export function StudioHero({ controller }: StudioHeroProps) {
 
       <div className="mt-5 flex flex-wrap items-end justify-between gap-5">
         <div className="max-w-3xl">
-          <h1 className="font-display text-4xl leading-[1.05] tracking-tight sm:text-6xl">
+          <h1
+            className="font-display text-4xl leading-[1.05] tracking-tight sm:text-6xl"
+            data-testid="studio-hero-title"
+          >
             Creator Operations Frontend
           </h1>
           <p className="mt-3 text-sm leading-relaxed text-[var(--muted-foreground)] sm:text-base">

@@ -47,9 +47,12 @@ jobs:
           cat /tmp/code_scanning_status.json
           echo "Unable to determine code scanning status (HTTP ${status})." >&2
           exit 1
-      - name: Skip CodeQL (code scanning disabled in repository settings)
+      - name: Require CodeQL (code scanning must be enabled)
         if: steps.code_scanning.outputs.enabled != 'true'
-        run: echo "Code scanning is disabled for this repository. Skipping CodeQL analysis."
+        run: |
+          echo "Code scanning is disabled for this repository."
+          echo "Enable Code Scanning in repository settings to satisfy strict security policy."
+          exit 1
       - name: Initialize CodeQL
         if: steps.code_scanning.outputs.enabled == 'true'
         uses: github/codeql-action/init@v3
@@ -61,31 +64,3 @@ jobs:
       - name: Analyze
         if: steps.code_scanning.outputs.enabled == 'true'
         uses: github/codeql-action/analyze@v3
-
-  snyk:
-    name: Snyk (optional)
-    runs-on: ubuntu-latest
-    env:
-      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-    steps:
-      - name: Skip Snyk (missing token)
-        if: env.SNYK_TOKEN == ''
-        run: echo "SNYK_TOKEN is not configured; skipping Snyk job steps."
-      - uses: actions/checkout@v4
-        if: env.SNYK_TOKEN != ''
-      - uses: pnpm/action-setup@v4
-        if: env.SNYK_TOKEN != ''
-        with:
-          version: 9.12.0
-      - uses: actions/setup-node@v4
-        if: env.SNYK_TOKEN != ''
-        with:
-          node-version: 22
-          cache: pnpm
-      - name: Install
-        if: env.SNYK_TOKEN != ''
-        run: pnpm install --frozen-lockfile
-      - name: Snyk Test (high)
-        if: env.SNYK_TOKEN != ''
-        continue-on-error: true
-        run: npx snyk test --all-projects --severity-threshold=high

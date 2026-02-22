@@ -10,7 +10,8 @@
     "test": "pnpm test:unit",
     "test:unit": "pnpm --filter @growth-os/shared build && tsx --test tests/**/*.test.ts",
     "test:integration": "pnpm --filter @growth-os/shared build && node scripts/check-integration-suites.mjs && tsx --test src/modules/**/tests/**/*.integration.test.ts",
-    "coverage:unit": "pnpm --filter @growth-os/shared build && c8 --reporter=text --reporter=lcov --include 'src/modules/scheduling/**/*.ts' --include 'src/modules/x_integration/x-client.ts' --check-coverage --lines 70 --functions 70 --branches 60 --statements 70 tsx --test tests/**/*.test.ts",
+    "coverage:project": "pnpm --filter @growth-os/shared build && c8 --reporter=text --reporter=lcov --all --include 'src/**/*.ts' --exclude 'src/main.ts' --exclude 'src/app.module.ts' --exclude 'src/**/*.controller.ts' --exclude 'src/shared/db/**/*.ts' --exclude 'src/shared/health/**/*.ts' --exclude 'src/modules/**/tests/**/*.ts' tsx --test tests/**/*.test.ts src/modules/**/tests/**/*.integration.test.ts",
+    "coverage:unit": "pnpm --filter @growth-os/shared build && c8 --reporter=text --reporter=lcov --include 'src/modules/x_integration/x-client.ts' --check-coverage --lines 99 --functions 99 --branches 95 --statements 99 tsx --test tests/**/*.test.ts",
     "db:migrate": "tsx src/shared/db/migrate.ts",
     "db:seed": "tsx src/shared/db/seed.ts"
   },

@@ -69,6 +69,7 @@ export function useStudioController() {
   const [sourceLimit, setSourceLimit] = useState("20");
   const [topic, setTopic] = useState("First-hour growth experiments");
   const [promptInput, setPromptInput] = useState("");
+  const [templateName, setTemplateName] = useState("");
   const [contentMode, setContentMode] = useState<ContentMode>("tweet");
 
   const [activeAction, setActiveAction] = useState<string | null>(null);
@@ -368,7 +369,8 @@ export function useStudioController() {
         accountId: selectedAccountId,
         topic: topic.trim(),
         type: contentMode,
-        promptInput: promptInput.trim() || undefined
+        promptInput: promptInput.trim() || undefined,
+        templateName: templateName.trim() || undefined
       });
 
       setDraftResult(result);
@@ -498,6 +500,8 @@ export function useStudioController() {
     setTopic,
     promptInput,
     setPromptInput,
+    templateName,
+    setTemplateName,
     contentMode,
     setContentMode,
 

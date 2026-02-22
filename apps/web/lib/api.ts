@@ -110,6 +110,26 @@ export type StyleProfile = {
   emojiRatio: number;
   ctaRatio: number;
   preferredTone: "concise" | "balanced" | "long";
+  preferredFormat: "single" | "thread" | "mixed";
+  languageRegister: "formal" | "neutral" | "informal";
+  humorSarcasmScore: number;
+  vocabulary: string[];
+  hookPatterns: Array<{
+    key: string;
+    label: string;
+    count: number;
+    examples: string[];
+  }>;
+  doList: string[];
+  dontList: string[];
+  ctaPatterns: string[];
+  brandSafetyNotes: string[];
+  sentenceRhythm: {
+    avgSentenceLength: number;
+    shortSentenceRatio: number;
+    mediumSentenceRatio: number;
+    longSentenceRatio: number;
+  };
 };
 
 export type StyleExtractResponse = {
@@ -265,8 +285,9 @@ export async function createDraft(payload: {
   workspaceId: string;
   accountId: string;
   topic: string;
-  type: "tweet" | "thread";
+  type: "tweet" | "thread" | "reply" | "quote";
   promptInput?: string;
+  templateName?: string;
 }) {
   return requestJson<CreateDraftResponse>("/generation/draft", {
     method: "POST",

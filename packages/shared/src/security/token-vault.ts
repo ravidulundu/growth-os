@@ -4,7 +4,7 @@ import { createLogger } from "../observability/logger";
 const ALGORITHM = "aes-256-gcm";
 const BASE64_32_BYTE_KEY_PATTERN =
   /^(?:[A-Za-z0-9+/]{43}=|[A-Za-z0-9+/]{44}|[A-Za-z0-9_-]{43}|[A-Za-z0-9_-]{44})$/;
-let derivedKeyWarningPrinted = false;
+const derivedKeyWarningFingerprints = new Set<string>();
 const logger = createLogger("token-vault");
 
 function allowDerivedKeyFallback() {
@@ -37,10 +37,11 @@ export function resolveEncryptionKey(rawKey: string) {
     throw new Error("TOKEN_ENCRYPTION_KEY must be a 32-byte key encoded as 64-char hex or base64.");
   }
 
-  if (!derivedKeyWarningPrinted) {
-    derivedKeyWarningPrinted = true;
+  const keyFingerprint = createHash("sha256").update(normalized).digest("hex").slice(0, 12);
+  if (!derivedKeyWarningFingerprints.has(keyFingerprint)) {
+    derivedKeyWarningFingerprints.add(keyFingerprint);
     logger.warn(
-      "Using derived TOKEN_ENCRYPTION_KEY fallback (sha256 of raw input). Provide a 32-byte hex/base64 key for production."
+      `Using derived TOKEN_ENCRYPTION_KEY fallback (sha256 of raw input). Provide a 32-byte hex/base64 key for production. key_fingerprint=${keyFingerprint}`
     );
   }
 

@@ -57,6 +57,8 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
+      - name: Format Check
+        run: pnpm format:check
       - name: Lint
         run: pnpm lint
 
@@ -166,9 +168,36 @@ jobs:
 
           pnpm smoke:test
 
-  build:
+  web_e2e:
     runs-on: ubuntu-latest
     needs: [integration_tests]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright Browser
+        run: pnpm --filter @growth-os/web exec playwright install --with-deps chromium
+      - name: Web E2E Tests
+        run: pnpm test:e2e
+      - name: Upload Playwright Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [integration_tests, web_e2e]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -198,11 +227,10 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
       - name: Dependency Audit (high, prod)
-        continue-on-error: true
         run: pnpm audit --prod --audit-level high
 
   deploy_staging:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     needs: [build]
     environment:
@@ -220,15 +248,18 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
-      - name: Skip deploy (missing STAGING_DEPLOY_HOOK_URL)
-        if: env.DEPLOY_HOOK_URL == ''
-        run: echo "STAGING_DEPLOY_HOOK_URL is not configured; skipping staging deploy."
+      - name: Validate staging deploy hook
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_HOOK_URL}" ]; then
+            echo "STAGING_DEPLOY_HOOK_URL is required for strict CI."
+            exit 1
+          fi
       - name: Deploy Staging
-        if: env.DEPLOY_HOOK_URL != ''
         run: pnpm deploy:staging
 
   smoke_staging:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.deploy_staging.result == 'success'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main') && needs.deploy_staging.result == 'success'
     runs-on: ubuntu-latest
     needs: [deploy_staging]
     env:
@@ -244,11 +275,14 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
-      - name: Skip smoke (missing STAGING_SMOKE_BASE_URL)
-        if: env.SMOKE_BASE_URL == ''
-        run: echo "STAGING_SMOKE_BASE_URL is not configured; skipping staging smoke tests."
+      - name: Validate staging smoke URL
+        run: |
+          set -euo pipefail
+          if [ -z "${SMOKE_BASE_URL}" ]; then
+            echo "STAGING_SMOKE_BASE_URL is required for strict CI."
+            exit 1
+          fi
       - name: Smoke Tests (Staging)
-        if: env.SMOKE_BASE_URL != ''
         run: pnpm smoke:test
 
   verify_prod_tag:
@@ -288,11 +322,14 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
-      - name: Skip deploy (missing PRODUCTION_DEPLOY_HOOK_URL)
-        if: env.DEPLOY_HOOK_URL == ''
-        run: echo "PRODUCTION_DEPLOY_HOOK_URL is not configured; skipping production deploy."
+      - name: Validate production deploy hook
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_HOOK_URL}" ]; then
+            echo "PRODUCTION_DEPLOY_HOOK_URL is required for strict CI."
+            exit 1
+          fi
       - name: Deploy Production
-        if: env.DEPLOY_HOOK_URL != ''
         run: pnpm deploy:prod
 
   smoke_prod:
@@ -312,9 +349,12 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
-      - name: Skip smoke (missing PRODUCTION_SMOKE_BASE_URL)
-        if: env.SMOKE_BASE_URL == ''
-        run: echo "PRODUCTION_SMOKE_BASE_URL is not configured; skipping production smoke tests."
+      - name: Validate production smoke URL
+        run: |
+          set -euo pipefail
+          if [ -z "${SMOKE_BASE_URL}" ]; then
+            echo "PRODUCTION_SMOKE_BASE_URL is required for strict CI."
+            exit 1
+          fi
       - name: Smoke Tests (Production)
-        if: env.SMOKE_BASE_URL != ''
         run: pnpm smoke:test
