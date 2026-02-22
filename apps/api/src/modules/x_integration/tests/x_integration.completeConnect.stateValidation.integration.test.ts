@@ -4,6 +4,9 @@ import { closePool, getPool } from "../../../shared/db/pool";
 import { XIntegrationService } from "../x-integration.service";
 
 test("x_integration.completeConnect.state_validation.integration", async (t) => {
+  const previousTokenKey = process.env.TOKEN_ENCRYPTION_KEY;
+  process.env.TOKEN_ENCRYPTION_KEY = previousTokenKey ?? "integration-test-token-key";
+
   const pool = getPool();
   const service = new XIntegrationService();
   const workspaceName = `integration-${Date.now()}-${Math.floor(Math.random() * 10_000)}`;
@@ -19,6 +22,11 @@ test("x_integration.completeConnect.state_validation.integration", async (t) => 
 
   t.after(async () => {
     await pool.query("DELETE FROM workspaces WHERE id = $1", [workspaceId]);
+    if (previousTokenKey === undefined) {
+      delete process.env.TOKEN_ENCRYPTION_KEY;
+    } else {
+      process.env.TOKEN_ENCRYPTION_KEY = previousTokenKey;
+    }
     await closePool();
   });
 

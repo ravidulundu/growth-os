@@ -6,7 +6,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
-    "test": "node -e \"console.log('No worker tests yet')\""
+    "test": "node -e \"process.stdout.write('No worker tests yet\\\\n')\""
   },
   "dependencies": {
     "bullmq": "5.34.4",

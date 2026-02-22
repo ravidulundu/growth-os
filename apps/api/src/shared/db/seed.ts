@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { Logger } from "@nestjs/common";
 import { closePool, getPool } from "./pool";
 import { loadEnv } from "./env";
 
@@ -37,12 +38,12 @@ async function main() {
     [workspaceResult.rows[0].id, userResult.rows[0].id]
   );
 
-  console.log("Seed complete: founder@example.com / Personal Workspace");
+  Logger.log("Seed complete: founder@example.com / Personal Workspace", "DBSeed");
   await closePool();
 }
 
 main().catch(async (error) => {
-  console.error("Seed failed", error);
+  Logger.error("Seed failed", error, "DBSeed");
   await closePool();
   process.exit(1);
 });

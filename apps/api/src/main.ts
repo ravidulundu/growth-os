@@ -51,4 +51,7 @@ async function bootstrap() {
   Logger.log(`API running on http://localhost:${port}`, "Bootstrap");
 }
 
-bootstrap();
+bootstrap().catch((error) => {
+  Logger.error("Failed to bootstrap API application", error, "Bootstrap");
+  process.exit(1);
+});

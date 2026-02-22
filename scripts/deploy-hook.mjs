@@ -1,3 +1,12 @@
+function writeStdout(message) {
+  process.stdout.write(`${message}\n`);
+}
+
+function writeStderr(message, error) {
+  const details = error instanceof Error ? ` ${error.stack ?? error.message}` : "";
+  process.stderr.write(`${message}${details}\n`);
+}
+
 function requiredEnv(name) {
   const value = process.env[name]?.trim();
   if (!value) {
@@ -30,10 +39,10 @@ async function main() {
     throw new Error(`Deploy hook failed (${response.status}): ${body}`);
   }
 
-  console.log(`[deploy] ${environment} deploy hook triggered successfully.`);
+  writeStdout(`[deploy] ${environment} deploy hook triggered successfully.`);
 }
 
 main().catch((error) => {
-  console.error("[deploy] hook trigger failed", error);
+  writeStderr("[deploy] hook trigger failed", error);
   process.exit(1);
 });

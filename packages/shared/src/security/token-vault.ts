@@ -1,9 +1,11 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createLogger } from "../observability/logger";
 
 const ALGORITHM = "aes-256-gcm";
 const BASE64_32_BYTE_KEY_PATTERN =
   /^(?:[A-Za-z0-9+/]{43}=|[A-Za-z0-9+/]{44}|[A-Za-z0-9_-]{43}|[A-Za-z0-9_-]{44})$/;
 let derivedKeyWarningPrinted = false;
+const logger = createLogger("token-vault");
 
 function allowDerivedKeyFallback() {
   const explicit = process.env.TOKEN_KEY_ALLOW_DERIVED?.trim().toLowerCase();
@@ -37,9 +39,8 @@ export function resolveEncryptionKey(rawKey: string) {
 
   if (!derivedKeyWarningPrinted) {
     derivedKeyWarningPrinted = true;
-    console.warn(
-      "[token-vault] Using derived TOKEN_ENCRYPTION_KEY fallback (sha256 of raw input). " +
-        "Provide a 32-byte hex/base64 key for production."
+    logger.warn(
+      "Using derived TOKEN_ENCRYPTION_KEY fallback (sha256 of raw input). Provide a 32-byte hex/base64 key for production."
     );
   }
 

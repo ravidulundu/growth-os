@@ -34,5 +34,9 @@ export function nextSchedulerState(
   current: SchedulerState,
   event: TransitionEvent
 ): SchedulerState {
-  return transitions[current][event] ?? current;
+  const nextState = transitions[current][event];
+  if (!nextState) {
+    throw new Error(`Invalid scheduler state transition: ${current} -> ${event}`);
+  }
+  return nextState;
 }

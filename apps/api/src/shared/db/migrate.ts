@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { Logger } from "@nestjs/common";
 import { closePool, getPool } from "./pool";
 import { findRepoRoot } from "./repo-root";
 import { loadEnv } from "./env";
@@ -36,7 +37,7 @@ async function applyMigration(fileName: string, sql: string) {
     try {
       await client.query("ROLLBACK");
     } catch (rollbackError) {
-      console.error("Migration rollback failed", rollbackError);
+      Logger.error("Migration rollback failed", rollbackError, "DBMigrate");
     }
     throw error;
   } finally {
@@ -62,15 +63,15 @@ async function main() {
 
     const sql = fs.readFileSync(path.join(migrationsDir, file), "utf8");
     await applyMigration(file, sql);
-    console.log(`Applied migration: ${file}`);
+    Logger.log(`Applied migration: ${file}`, "DBMigrate");
   }
 
-  console.log("Migration complete");
+  Logger.log("Migration complete", "DBMigrate");
   await closePool();
 }
 
 main().catch(async (error) => {
-  console.error("Migration failed", error);
+  Logger.error("Migration failed", error, "DBMigrate");
   await closePool();
   process.exit(1);
 });

@@ -29,6 +29,35 @@ function extractBearerToken(headerValue: string | string[] | undefined) {
   return token;
 }
 
+function extractCookieToken(headerValue: string | string[] | undefined, cookieName: string) {
+  const header = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  if (!header) {
+    return null;
+  }
+
+  for (const pair of header.split(";")) {
+    const separatorIndex = pair.indexOf("=");
+    if (separatorIndex <= 0) {
+      continue;
+    }
+    const name = pair.slice(0, separatorIndex).trim();
+    if (name !== cookieName) {
+      continue;
+    }
+    const value = pair.slice(separatorIndex + 1).trim();
+    if (!value) {
+      return null;
+    }
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  }
+
+  return null;
+}
+
 function pickStringValue(value: unknown) {
   if (typeof value === "string") {
     const trimmed = value.trim();
@@ -106,9 +135,11 @@ export class SessionAuthGuard implements CanActivate {
       query?: Record<string, unknown>;
       auth?: { userId: string; sessionId: string; workspaceId?: string };
     }>();
-    const token = extractBearerToken(request.headers.authorization);
+    const token =
+      extractBearerToken(request.headers.authorization) ??
+      extractCookieToken(request.headers.cookie, "session_token");
     if (!token) {
-      throw new UnauthorizedException("Missing or invalid Authorization header");
+      throw new UnauthorizedException("Missing or invalid session token");
     }
 
     const tokenHash = createHash("sha256").update(token).digest("hex");

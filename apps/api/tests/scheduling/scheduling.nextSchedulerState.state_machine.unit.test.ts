@@ -7,5 +7,7 @@ test("scheduling.nextSchedulerState.state_machine.unit", () => {
   assert.equal(nextSchedulerState("in_progress", "retry"), "retry_wait");
   assert.equal(nextSchedulerState("retry_wait", "start"), "in_progress");
   assert.equal(nextSchedulerState("in_progress", "complete"), "completed");
-  assert.equal(nextSchedulerState("queued", "complete"), "queued");
+  assert.throws(() => nextSchedulerState("queued", "complete"), {
+    message: /Invalid scheduler state transition/
+  });
 });

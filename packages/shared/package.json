@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "test": "node -e \"console.log('No shared tests yet')\""
+    "test": "node -e \"process.stdout.write('No shared tests yet\\\\n')\""
   },
   "devDependencies": {
     "@types/node": "22.10.1"

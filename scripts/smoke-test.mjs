@@ -1,3 +1,12 @@
+function writeStdout(message) {
+  process.stdout.write(`${message}\n`);
+}
+
+function writeStderr(message, error) {
+  const details = error instanceof Error ? ` ${error.stack ?? error.message}` : "";
+  process.stderr.write(`${message}${details}\n`);
+}
+
 function requiredEnv(name) {
   const value = process.env[name]?.trim();
   if (!value) {
@@ -46,10 +55,10 @@ async function main() {
     throw new Error(`Magic link request did not return ok=true: ${JSON.stringify(magicLink)}`);
   }
 
-  console.log("[smoke] healthcheck + magic-link request passed");
+  writeStdout("[smoke] healthcheck + magic-link request passed");
 }
 
 main().catch((error) => {
-  console.error("[smoke] failed", error);
+  writeStderr("[smoke] failed", error);
   process.exit(1);
 });

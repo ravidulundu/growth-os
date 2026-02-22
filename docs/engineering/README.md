@@ -1,6 +1,6 @@
 # Engineering Rules
 
-Bu klasör Faz 4 kapsamında ürünleşme ve ekip ölçeklenmesi için zorunlu mühendislik kurallarını içerir.
+Bu klasor Faz 4 kapsaminda urunlesme ve ekip olceklenmesi icin zorunlu muhendislik kurallarini icerir.
 
 ## Documents
 
@@ -10,6 +10,7 @@ Bu klasör Faz 4 kapsamında ürünleşme ve ekip ölçeklenmesi için zorunlu m
 - `docs/engineering/versioning-and-release-notes.md`
 - `docs/engineering/test-strategy-and-quality-gates.md`
 - `docs/engineering/ci-cd-pipeline.md`
+- `docs/engineering/observability-and-alerting.md`
 
 ## Enforcement
 

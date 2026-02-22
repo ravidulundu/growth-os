@@ -16,6 +16,12 @@ export default [
       "*.pdf"
     ]
   },
+  {
+    linterOptions: {
+      noInlineConfig: true,
+      reportUnusedDisableDirectives: "error"
+    }
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -27,7 +33,8 @@ export default [
       }
     },
     rules: {
-      "no-console": "off",
+      "no-console": "error",
+      "@typescript-eslint/no-explicit-any": "error",
       "no-restricted-imports": [
         "error",
         {

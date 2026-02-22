@@ -139,11 +139,17 @@ let cachedClient: XClient | undefined;
 let cachedMode: string | undefined;
 
 function currentMode() {
-  return (process.env.X_CLIENT_MODE ?? "mock").trim().toLowerCase();
+  return process.env.X_CLIENT_MODE?.trim().toLowerCase() ?? "mock";
 }
 
 export function getXClient(): XClient {
   const mode = currentMode();
+  const nodeEnv = process.env.NODE_ENV?.trim().toLowerCase();
+
+  if (nodeEnv === "production" && mode === "mock") {
+    throw new Error("X_CLIENT_MODE=mock is not allowed in production.");
+  }
+
   if (cachedClient && cachedMode === mode) {
     return cachedClient;
   }

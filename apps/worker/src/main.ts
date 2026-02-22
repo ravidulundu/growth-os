@@ -4,6 +4,7 @@ import { config } from "dotenv";
 import {
   calculateBackoffDelayMs,
   cosineSimilarity,
+  createLogger,
   decryptSecret as decryptSecretWithKey,
   nextSchedulerState,
   type SchedulerState
@@ -17,10 +18,39 @@ const databaseUrl =
   process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:55432/growth_os";
 const publishQueueName = "publish-jobs";
 const metricsQueueName = "metrics-jobs";
+const logger = createLogger("worker");
 
 function getRedisUrl() {
   return process.env.REDIS_URL ?? "redis://localhost:56379";
 }
+
+function sanitizeRedisUrl(rawUrl: string) {
+  try {
+    const parsed = new URL(rawUrl);
+    parsed.username = parsed.username ? "***" : "";
+    parsed.password = parsed.password ? "***" : "";
+    return parsed.toString();
+  } catch {
+    return "<invalid-redis-url>";
+  }
+}
+
+function xClientMode() {
+  return (process.env.X_CLIENT_MODE ?? "mock").trim().toLowerCase();
+}
+
+function assertSupportedXClientMode() {
+  const mode = xClientMode();
+  const nodeEnv = process.env.NODE_ENV?.trim().toLowerCase();
+  if (nodeEnv === "production" && mode === "mock") {
+    throw new Error("X_CLIENT_MODE=mock is not allowed in production worker.");
+  }
+  if (mode !== "mock") {
+    throw new Error(`Unsupported worker X client mode: ${mode}`);
+  }
+}
+
+assertSupportedXClientMode();
 
 const redisConnection = new IORedis(getRedisUrl(), {
   maxRetriesPerRequest: null,
@@ -45,8 +75,11 @@ type XPostMetrics = {
 };
 
 function decryptSecret(payload: string) {
-  const rawKey = process.env.TOKEN_ENCRYPTION_KEY;
-  return decryptSecretWithKey(payload, rawKey ?? "local-dev-insecure-key");
+  const rawKey = process.env.TOKEN_ENCRYPTION_KEY?.trim();
+  if (!rawKey) {
+    throw new Error("TOKEN_ENCRYPTION_KEY must be configured.");
+  }
+  return decryptSecretWithKey(payload, rawKey);
 }
 
 function tokenSuffix(value: string) {
@@ -110,8 +143,8 @@ function safeModeEnabled() {
 }
 
 function similarityGuardEnabled() {
-  const explicit = process.env.SAFE_MODE_SIMILARITY_GUARD_ENABLED;
-  if (explicit !== undefined) {
+  const explicit = process.env.SAFE_MODE_SIMILARITY_GUARD_ENABLED?.trim();
+  if (explicit) {
     return explicit.toLowerCase() !== "false";
   }
   return safeModeEnabled();
@@ -216,13 +249,6 @@ async function processPublishJob(publishJobId: string) {
     }
 
     const inProgressState = nextSchedulerState(jobRow.state as SchedulerState, "start");
-    if (inProgressState === jobRow.state) {
-      throw Object.assign(new Error(`Invalid publish state transition from ${jobRow.state}`), {
-        code: "INVALID_STATE_TRANSITION",
-        transient: false
-      });
-    }
-
     const attempt = Number(jobRow.attempt_count) + 1;
     await client.query(
       `
@@ -302,14 +328,16 @@ async function processPublishJob(publishJobId: string) {
     if (!publishedPostId || !externalPostId) {
       const tokenResult = await client.query<{ access_token_encrypted: string }>(
         `
-          SELECT access_token_encrypted
-          FROM x_tokens
-          WHERE account_id = $1
-            AND revoked_at IS NULL
-          ORDER BY created_at DESC
+          SELECT xt.access_token_encrypted
+          FROM x_tokens xt
+          JOIN x_accounts xa ON xa.id = xt.account_id
+          WHERE xt.account_id = $1
+            AND xa.workspace_id = $2
+            AND xt.revoked_at IS NULL
+          ORDER BY xt.created_at DESC
           LIMIT 1;
         `,
-        [jobRow.account_id]
+        [jobRow.account_id, jobRow.workspace_id]
       );
 
       if (!tokenResult.rows[0]) {
@@ -359,6 +387,16 @@ async function processPublishJob(publishJobId: string) {
       activeAccountId = currentJob.account_id;
       activeContentId = currentJob.content_id;
       completionBaseState = currentJob.state;
+
+      if (completionBaseState !== "in_progress") {
+        throw Object.assign(
+          new Error(`Unexpected publish job state during finalize: ${completionBaseState}`),
+          {
+            code: "INVALID_STATE_TRANSITION",
+            transient: false
+          }
+        );
+      }
 
       const insertedPublished = await client.query<{ id: string; external_post_id: string }>(
         `
@@ -466,6 +504,10 @@ async function processPublishJob(publishJobId: string) {
 
       const attempt = Number(stateResult.rows[0].attempt_count);
       const currentState = stateResult.rows[0].state;
+      if (["completed", "failed_permanent", "cancelled"].includes(currentState)) {
+        await recoveryClient.query("COMMIT");
+        return;
+      }
       const processingState =
         currentState === "in_progress" ? currentState : nextSchedulerState(currentState, "start");
       if (classified.transient && attempt < maxAttempts) {
@@ -527,8 +569,15 @@ async function processPublishJob(publishJobId: string) {
             );
 
             if (enqueueStateResult.rows[0]) {
+              const enqueueFailureBaseState = enqueueStateResult.rows[0].state;
+              if (
+                ["completed", "failed_permanent", "cancelled"].includes(enqueueFailureBaseState)
+              ) {
+                await enqueueRecoveryClient.query("COMMIT");
+                throw enqueueError;
+              }
               const enqueueFailureState = nextSchedulerState(
-                enqueueStateResult.rows[0].state,
+                enqueueFailureBaseState,
                 "fail_permanent"
               );
               await enqueueRecoveryClient.query(
@@ -626,7 +675,7 @@ async function processPublishJob(publishJobId: string) {
       );
       await recoveryClient.query("COMMIT");
     } catch (innerError) {
-      console.error("[worker] publish error handling failed", innerError);
+      logger.error("publish error handling failed", innerError);
       try {
         await recoveryClient.query("ROLLBACK");
       } catch {
@@ -647,14 +696,16 @@ async function processPublishJob(publishJobId: string) {
   try {
     const tokenResult = await dbPool.query<{ access_token_encrypted: string }>(
       `
-        SELECT access_token_encrypted
-        FROM x_tokens
-        WHERE account_id = $1
-          AND revoked_at IS NULL
-        ORDER BY created_at DESC
+        SELECT xt.access_token_encrypted
+        FROM x_tokens xt
+        JOIN x_accounts xa ON xa.id = xt.account_id
+        WHERE xt.account_id = $1
+          AND xa.workspace_id = $2
+          AND xt.revoked_at IS NULL
+        ORDER BY xt.created_at DESC
         LIMIT 1;
       `,
-      [postCommitMetricsPayload.accountId]
+      [postCommitMetricsPayload.accountId, postCommitMetricsPayload.workspaceId]
     );
 
     if (!tokenResult.rows[0]) {
@@ -689,10 +740,7 @@ async function processPublishJob(publishJobId: string) {
       }
     );
   } catch (metricsError) {
-    console.error(
-      `[worker] post-publish metrics collection failed for publishJobId=${publishJobId}`,
-      metricsError
-    );
+    logger.error("post-publish metrics collection failed", metricsError, { publishJobId });
   }
 }
 
@@ -717,14 +765,16 @@ async function processMetricsJob(payload: { publishedPostId: string; windowKey: 
 
   const tokenResult = await dbPool.query<{ access_token_encrypted: string }>(
     `
-      SELECT access_token_encrypted
-      FROM x_tokens
-      WHERE account_id = $1
-        AND revoked_at IS NULL
-      ORDER BY created_at DESC
+      SELECT xt.access_token_encrypted
+      FROM x_tokens xt
+      JOIN x_accounts xa ON xa.id = xt.account_id
+      WHERE xt.account_id = $1
+        AND xa.workspace_id = $2
+        AND xt.revoked_at IS NULL
+      ORDER BY xt.created_at DESC
       LIMIT 1;
     `,
-    [publishedResult.rows[0].account_id]
+    [publishedResult.rows[0].account_id, publishedResult.rows[0].workspace_id]
   );
 
   if (!tokenResult.rows[0]) {
@@ -763,31 +813,37 @@ const publishEvents = new QueueEvents(publishQueueName, { connection: redisConne
 const metricsEvents = new QueueEvents(metricsQueueName, { connection: redisConnection });
 
 publishEvents.on("completed", ({ jobId }) => {
-  console.log(`[worker] publish job completed: ${jobId}`);
+  logger.info("publish job completed", { jobId });
 });
 
 publishEvents.on("failed", ({ jobId, failedReason }) => {
-  console.error(`[worker] publish job failed: ${jobId} - ${failedReason}`);
+  logger.error("publish job failed", undefined, { jobId, failedReason });
 });
 
 metricsEvents.on("completed", ({ jobId }) => {
-  console.log(`[worker] metrics job completed: ${jobId}`);
+  logger.info("metrics job completed", { jobId });
 });
 
 publishWorker.on("ready", () => {
-  console.log(`[worker] publish worker ready on '${publishQueueName}' using ${getRedisUrl()}`);
+  logger.info("publish worker ready", {
+    queue: publishQueueName,
+    redis: sanitizeRedisUrl(getRedisUrl())
+  });
 });
 
 metricsWorker.on("ready", () => {
-  console.log(`[worker] metrics worker ready on '${metricsQueueName}' using ${getRedisUrl()}`);
+  logger.info("metrics worker ready", {
+    queue: metricsQueueName,
+    redis: sanitizeRedisUrl(getRedisUrl())
+  });
 });
 
 publishWorker.on("error", (error) => {
-  console.error("[worker] publish worker error", error);
+  logger.error("publish worker error", error);
 });
 
 metricsWorker.on("error", (error) => {
-  console.error("[worker] metrics worker error", error);
+  logger.error("metrics worker error", error);
 });
 
 let shuttingDown = false;
@@ -799,7 +855,7 @@ const shutdown = async (signal: string) => {
 
   shuttingDown = true;
   try {
-    console.log(`[worker] received ${signal}, shutting down gracefully`);
+    logger.info("received shutdown signal", { signal });
     await publishWorker.close();
     await metricsWorker.close();
     await publishEvents.close();
@@ -810,7 +866,7 @@ const shutdown = async (signal: string) => {
     await dbPool.end();
     process.exit(0);
   } catch (error) {
-    console.error("[worker] shutdown failed", error);
+    logger.error("shutdown failed", error);
     process.exit(1);
   }
 };

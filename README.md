@@ -79,6 +79,7 @@ Mail testi için MailHog'u profile ile ayağa kaldır:
 - Engineering docs index: `docs/engineering/README.md`
 - Test strategy: `docs/engineering/test-strategy-and-quality-gates.md`
 - CI/CD pipeline: `docs/engineering/ci-cd-pipeline.md`
+- Observability/alerting: `docs/engineering/observability-and-alerting.md`
 - Branch check (local): `pnpm branch:check feat/my-change`
 - Commit convention check (local): `pnpm commitlint`
 - Full quality gate (local): `pnpm quality:gate`
@@ -90,3 +91,4 @@ Mail testi için MailHog'u profile ile ayağa kaldır:
 - `docs/faz-3-setup.md`
 - `docs/faz-4-proje-kurallari.md`
 - `docs/faz-5-gelistirme-test.md`
+- `docs/faz-7-stabilizasyon-izleme.md`
