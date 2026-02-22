@@ -50,6 +50,17 @@ export function authCookieSecure() {
   return nodeEnv === "production" || nodeEnv === "staging";
 }
 
+export function authCookieSameSite() {
+  const explicit = process.env.AUTH_COOKIE_SAME_SITE?.trim().toLowerCase();
+  if (explicit === "lax") {
+    return "Lax";
+  }
+  if (explicit === "none") {
+    return authCookieSecure() ? "None" : "Lax";
+  }
+  return "Strict";
+}
+
 function toWebHeaders(headersObject: FastifyRequest["headers"]) {
   const headers = new Headers();
   for (const [key, value] of Object.entries(headersObject)) {
@@ -72,7 +83,7 @@ export function buildCookieValue(sessionToken: string) {
     `session_token=${encodeURIComponent(sessionToken)}`,
     "Path=/",
     "HttpOnly",
-    "SameSite=Strict",
+    `SameSite=${authCookieSameSite()}`,
     `Max-Age=${30 * 24 * 60 * 60}`
   ];
 

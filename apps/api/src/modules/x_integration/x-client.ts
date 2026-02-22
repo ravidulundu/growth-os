@@ -533,6 +533,7 @@ function currentMode() {
 }
 
 export function getXClient(): XClient {
+  // Process-local cache: runtime env changes (mode/secrets) require restart for deterministic behavior.
   const mode = currentMode();
   const nodeEnv = process.env.NODE_ENV?.trim().toLowerCase();
 

@@ -6,7 +6,6 @@ import {
   UnauthorizedException
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import { createHash } from "node:crypto";
 import { getPool } from "../db/pool";
 import { IS_PUBLIC_ROUTE } from "./public.decorator";
 
@@ -156,15 +155,10 @@ export function isWorkspaceScopeOptionalRoute(request: RouteAwareRequest) {
 }
 
 export function buildSessionTokenLookupCandidates(token: string) {
-  const sha256 = createHash("sha256").update(token).digest();
-  return Array.from(
-    new Set([
-      token,
-      sha256.toString("hex"),
-      sha256.toString("base64"),
-      sha256.toString("base64url")
-    ])
-  );
+  // Better Auth session tokens are persisted and looked up as raw token values.
+  // Do not include token hashes here to avoid accepting database hash material
+  // as if it were a real bearer token.
+  return [token];
 }
 
 @Injectable()

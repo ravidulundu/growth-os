@@ -11,6 +11,7 @@ function getRedisUrl() {
 
 function connection() {
   if (!redisConnection) {
+    // API process only enqueues jobs; workers use separate Redis connections.
     redisConnection = new IORedis(getRedisUrl(), {
       maxRetriesPerRequest: null,
       enableReadyCheck: true

@@ -10,6 +10,7 @@ import {
   type SchedulerState
 } from "@growth-os/shared";
 import { Pool } from "pg";
+import { envFloat, envInt } from "./env";
 import { assertSupportedXClientMode } from "./runtime-policy";
 
 config();
@@ -19,18 +20,6 @@ const databaseUrl =
 const publishQueueName = "publish-jobs";
 const metricsQueueName = "metrics-jobs";
 const logger = createLogger("worker");
-
-function envInt(name: string, fallback: number, min = 1) {
-  const raw = process.env[name]?.trim();
-  if (!raw) {
-    return fallback;
-  }
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < min) {
-    return fallback;
-  }
-  return Math.floor(parsed);
-}
 
 function getRedisUrl() {
   return process.env.REDIS_URL ?? "redis://localhost:56379";
@@ -333,7 +322,7 @@ async function processPublishJob(publishJobId: string) {
     }
 
     if (similarityGuardEnabled()) {
-      const similarityThreshold = Number(process.env.SAFE_MODE_MAX_SIMILARITY ?? 0.85);
+      const similarityThreshold = envFloat("SAFE_MODE_MAX_SIMILARITY", 0.85, 0, 1);
       const recentPublished = await client.query<{ current_text: string }>(
         `
           SELECT c.current_text

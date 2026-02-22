@@ -121,6 +121,17 @@ function resolveUseSecureCookies() {
   return nodeEnv === "production" || nodeEnv === "staging";
 }
 
+function resolveCookieSameSite() {
+  const explicit = process.env.AUTH_COOKIE_SAME_SITE?.trim().toLowerCase();
+  if (explicit === "lax") {
+    return "lax" as const;
+  }
+  if (explicit === "none") {
+    return resolveUseSecureCookies() ? ("none" as const) : ("lax" as const);
+  }
+  return "strict" as const;
+}
+
 function computeEmailHash(email: string) {
   return createHash("sha256").update(email.toLowerCase().trim()).digest("hex");
 }
@@ -300,7 +311,7 @@ async function createBetterAuthInstance(): Promise<BetterAuthInstance> {
           name: "session_token",
           attributes: {
             httpOnly: true,
-            sameSite: "strict",
+            sameSite: resolveCookieSameSite(),
             path: "/"
           }
         }
@@ -364,6 +375,7 @@ async function createBetterAuthInstance(): Promise<BetterAuthInstance> {
 
 export async function getBetterAuth() {
   if (!authInstancePromise) {
+    // Better Auth is initialized once per process; config/env changes need restart.
     authInstancePromise = createBetterAuthInstance().catch((error) => {
       authInstancePromise = null;
       throw error;

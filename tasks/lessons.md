@@ -20,3 +20,5 @@
 - Review thread kapanışı istenirken sadece kodu düzeltmek yetmez; aynı turda her thread için birebir reply + resolve yapıp `pr:review-check` çıktısını sıfırlamadan işi bitmiş sayma.
 - Programmatic auth verify endpointlerinde `Accept` header tek başına güvenilir sinyal değildir; fetch vs navigation ayrımı için `Sec-Fetch-*` başlıklarını birlikte kontrol et.
 - Maliyetli dış API çağrısı olan akışlarda (LLM vb.) limit/uygunluk precheck’i çağrıdan önce koy; nihai limit kontrolünü transaction içinde ikinci kez koruyarak race riskini yönet.
+- Review thread güvenlik yorumlarında yalnız davranış fix’i yetmez; env parse (`Number(...)`) gibi config güvenliği için finite/range doğrulaması ekle.
+- CI branch koşullarında staging/prod ayrımını workflow `if` bloklarında açık ve tekil tut; yanlış branch eşleşmesi sessizce yanlış deploy zinciri başlatabilir.

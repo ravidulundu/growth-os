@@ -230,7 +230,7 @@ jobs:
         run: pnpm audit --prod --audit-level high
 
   deploy_staging:
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     needs: [build]
     environment:
@@ -259,7 +259,7 @@ jobs:
         run: pnpm deploy:staging
 
   smoke_staging:
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main') && needs.deploy_staging.result == 'success'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.deploy_staging.result == 'success'
     runs-on: ubuntu-latest
     needs: [deploy_staging]
     env:

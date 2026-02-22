@@ -409,6 +409,7 @@ export class GenerationService {
   }
 
   protected async preflightGenerationLimit(workspaceId: string, requestedUnits = 1) {
+    // Best-effort precheck before LLM cost; authoritative limit enforcement remains transactional.
     const metering = await this.billingService.getWorkspaceMetering(workspaceId);
     if (
       metering.monthlyGenerationLimit !== null &&

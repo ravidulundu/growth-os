@@ -218,6 +218,40 @@
   - `pnpm lint` pass
   - `pnpm --filter @growth-os/api test:unit` pass
   - `pnpm --filter @growth-os/api test:integration` pass
+
+## Next Plan (PR Review Closure Round 2)
+
+- [x] Açık thread listesini yeniden doğrula (`scripts/check-pr-review-threads.mjs`)
+- [x] Güvenlik/CI odaklı aksiyon yorumlarını kodda düzelt:
+  - worker similarity env parse fallback
+  - session token lookup candidate daraltma
+  - staging deploy condition düzeltmesi
+  - analytics UUID param validation
+  - auth SameSite configurability
+- [x] İlgili unit testleri ekle/güncelle (worker env, analytics uuid, auth cookie, session token lookup)
+- [x] Lint + typecheck + unit/integration doğrulamalarını çalıştır
+- [ ] Tüm düzeltmeleri tek commit olarak gönder
+- [ ] Her açık review thread’ine kısa not bırak ve resolve et
+
+### Round 2 Progress
+
+- `apps/worker/src/env.ts` eklendi; `SAFE_MODE_MAX_SIMILARITY` parse güvenliği `envFloat` ile merkezi hale getirildi.
+- `apps/worker/src/main.ts` similarity threshold parse işlemi `envFloat("SAFE_MODE_MAX_SIMILARITY", 0.85, 0, 1)` ile güvenli fallback’e taşındı.
+- `apps/worker/tests/env.test.ts` eklendi; empty/invalid/out-of-range env senaryoları doğrulandı.
+- `apps/api/src/shared/auth/session-auth.guard.ts` lookup candidate listesi raw token ile sınırlandı.
+- `apps/api/tests/auth/session-token-lookup-candidates.test.ts` yeni davranışa göre güncellendi.
+- `apps/api/src/modules/analytics/analytics.controller.ts` UUID param validation eklendi (`requireUuidParam`).
+- `apps/api/tests/analytics/analytics.controller.uuid_params.unit.test.ts` eklendi.
+- `apps/api/src/modules/auth/auth.controller.ts` + `apps/api/src/modules/auth/better-auth.ts` için `AUTH_COOKIE_SAME_SITE` desteği eklendi.
+- `apps/api/tests/auth/auth-cookie-secure.test.ts` same-site davranış testleri genişletildi.
+- `.github/workflows/ci.yml` staging deploy/smoke koşulları yalnız `develop` branch’e indirildi.
+- `apps/api/src/modules/scheduling/queue.ts`, `apps/api/src/modules/x_integration/x-client.ts`, `apps/api/src/modules/generation/generation.service.ts` dosyalarına ilgili review notlarını açıklayan kısa yorumlar eklendi.
+- Bu tur doğrulama:
+  - `pnpm lint` pass
+  - `pnpm typecheck` pass
+  - `pnpm --filter @growth-os/worker test` pass
+  - `pnpm --filter @growth-os/api test:unit` pass
+  - `pnpm --filter @growth-os/api test:integration` pass
   - `pnpm --filter @growth-os/worker test` pass
   - `pnpm typecheck` pass
 
