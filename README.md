@@ -42,6 +42,17 @@ Not: `3000` doluysa `WEB_PORT=3010 pnpm dev` ile web portunu override edebilirsi
 - `pnpm format`: Prettier write
 - `pnpm format:check`: Prettier check
 
+## MVP-0 API Akışı (Local)
+
+1. `POST /x/connect/start` -> OAuth2 PKCE start
+2. `POST /x/connect/callback` -> X account + encrypted token kaydı
+3. `POST /x/timeline/ingest` -> timeline postlarını DB'ye al
+4. `POST /style/extract` -> style_profile üret
+5. `POST /generation/draft` -> draft + v1 oluştur
+6. `POST /scheduling/schedule` (veya `/publish-now`) -> publish job enqueue
+7. Worker publish eder, `post_metric_snapshots` (`t15`, `t60`, `t24`) yazar
+8. `GET /analytics/content/:workspaceId/:contentId` ile metrics gör
+
 ## Optional MailHog
 
 Mail testi için MailHog'u profile ile ayağa kaldır:
@@ -61,3 +72,11 @@ Mail testi için MailHog'u profile ile ayağa kaldır:
 - Branch check (local): `pnpm branch:check feat/my-change`
 - Commit convention check (local): `pnpm commitlint`
 - Full quality gate (local): `pnpm quality:gate`
+
+## Faz Dokumanlari
+
+- `docs/faz-1-discovery-kapsam.md`
+- `docs/faz-2-mimari-stack.md`
+- `docs/faz-3-setup.md`
+- `docs/faz-4-proje-kurallari.md`
+- `docs/faz-5-gelistirme-test.md`

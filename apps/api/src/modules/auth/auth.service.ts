@@ -32,6 +32,10 @@ function canLogMagicLinkToConsole() {
   return process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
 }
 
+function canLogFullMagicLinkToConsole() {
+  return (process.env.AUTH_DEV_LOG_MAGIC_LINK_URL ?? "false").toLowerCase() === "true";
+}
+
 @Injectable()
 export class AuthService {
   protected dbPool() {
@@ -48,7 +52,14 @@ export class AuthService {
         throw new InternalServerErrorException("Magic link delivery is not configured");
       }
 
-      Logger.log(`[auth] dev magic link for ${email}: ${magicLink}`, "AuthService");
+      if (canLogFullMagicLinkToConsole()) {
+        Logger.log(`[auth] dev magic link for ${email}: ${magicLink}`, "AuthService");
+      } else {
+        Logger.log(
+          `[auth] dev magic link generated for ${email}. Set AUTH_DEV_LOG_MAGIC_LINK_URL=true to print full URL.`,
+          "AuthService"
+        );
+      }
       return;
     }
 
@@ -128,12 +139,29 @@ export class AuthService {
     const email = emailInput.toLowerCase().trim();
     const token = randomBytes(24).toString("hex");
     const tokenHash = createHash("sha256").update(token).digest("hex");
-    await this.createMagicLinkToken(email, tokenHash);
+    try {
+      await this.createMagicLinkToken(email, tokenHash);
+    } catch (error) {
+      if (error instanceof HttpException && error.getStatus() === HttpStatus.TOO_MANY_REQUESTS) {
+        return buildMagicLinkRequestResponse();
+      }
+      throw error;
+    }
 
     try {
       await this.sendMagicLink(email, token);
     } catch (error) {
-      await this.dbPool().query("DELETE FROM magic_link_tokens WHERE token_hash = $1", [tokenHash]);
+      try {
+        await this.dbPool().query("DELETE FROM magic_link_tokens WHERE token_hash = $1", [
+          tokenHash
+        ]);
+      } catch (deleteError) {
+        Logger.error(
+          "Failed to cleanup magic link token after send failure",
+          deleteError,
+          "AuthService"
+        );
+      }
       throw error;
     }
 
@@ -175,7 +203,7 @@ export class AuthService {
           INSERT INTO users (email, email_hash)
           VALUES ($1, $2)
           ON CONFLICT (email)
-          DO UPDATE SET updated_at = now()
+          DO UPDATE SET email_hash = EXCLUDED.email_hash, updated_at = now()
           RETURNING id;
         `,
         [tokenRow.email, emailHash]

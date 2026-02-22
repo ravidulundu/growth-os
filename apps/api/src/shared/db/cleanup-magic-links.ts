@@ -1,6 +1,6 @@
 import { Logger } from "@nestjs/common";
 import { loadEnv } from "./env";
-import { getPool } from "./pool";
+import { closePool, getPool } from "./pool";
 
 async function cleanupMagicLinkTokens() {
   loadEnv();
@@ -25,7 +25,7 @@ async function cleanupMagicLinkTokens() {
 
     Logger.log(`Cleaned ${result.rowCount ?? 0} stale magic link token rows`, "DBCleanup");
   } finally {
-    await pool.end();
+    await closePool();
   }
 }
 

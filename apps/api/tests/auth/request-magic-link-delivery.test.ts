@@ -96,6 +96,7 @@ test("requestMagicLink removes token row when delivery fails", async () => {
 test("requestMagicLink enforces per-email hourly rate limit", async () => {
   const previousLimit = process.env.AUTH_MAGIC_LINK_MAX_REQUESTS_PER_HOUR;
   process.env.AUTH_MAGIC_LINK_MAX_REQUESTS_PER_HOUR = "5";
+  let sendAttempted = false;
 
   const executedQueries: QueryLog[] = [];
   const fakePool = createFakePool(5, executedQueries);
@@ -106,21 +107,21 @@ test("requestMagicLink enforces per-email hourly rate limit", async () => {
     }
 
     protected override async sendMagicLink() {
-      throw new Error("must not send when rate-limited");
+      sendAttempted = true;
     }
   }
 
   try {
     const service = new TestAuthService();
-    await assert.rejects(() => service.requestMagicLink("founder@example.com"), {
-      name: "HttpException"
-    });
+    const response = await service.requestMagicLink("founder@example.com");
+    assert.equal(response.ok, true);
 
     assert.ok(
       executedQueries.some((q) => q.sql.startsWith("SELECT COUNT(*)::int AS request_count"))
     );
     assert.ok(executedQueries.some((q) => q.sql === "ROLLBACK"));
     assert.ok(!executedQueries.some((q) => q.sql.startsWith("INSERT INTO magic_link_tokens")));
+    assert.equal(sendAttempted, false);
   } finally {
     if (previousLimit === undefined) {
       delete process.env.AUTH_MAGIC_LINK_MAX_REQUESTS_PER_HOUR;
@@ -169,4 +170,39 @@ test("requestMagicLink requires SMTP outside development and test environments",
       process.env.SMTP_HOST = previousSmtpHost;
     }
   }
+});
+
+test("requestMagicLink preserves original send error when cleanup delete fails", async () => {
+  const executedQueries: QueryLog[] = [];
+  const fakePool = createFakePool(0, executedQueries);
+
+  class TestAuthService extends AuthService {
+    protected override dbPool() {
+      return {
+        ...fakePool,
+        async query<T>(sql: string, values?: unknown[]): Promise<{ rows: T[] }> {
+          const normalized = normalizeSql(sql);
+          executedQueries.push({ sql: normalized, values });
+          if (normalized.startsWith("DELETE FROM magic_link_tokens WHERE token_hash = $1")) {
+            throw new Error("delete failed");
+          }
+          return { rows: [] as T[] };
+        }
+      } as ReturnType<AuthService["dbPool"]>;
+    }
+
+    protected override async sendMagicLink() {
+      throw new Error("smtp unavailable");
+    }
+  }
+
+  const service = new TestAuthService();
+  await assert.rejects(() => service.requestMagicLink("founder@example.com"), {
+    message: "smtp unavailable"
+  });
+  assert.ok(
+    executedQueries.some((q) =>
+      q.sql.startsWith("DELETE FROM magic_link_tokens WHERE token_hash = $1")
+    )
+  );
 });
