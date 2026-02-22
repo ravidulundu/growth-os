@@ -32,6 +32,8 @@ async function bootstrap() {
   );
 
   // CORS policy is read once at startup; restart is required after env changes.
+  // Keep CORS registration in a single place. Do not call app.enableCors()
+  // in addition to this block to avoid duplicate CORS hook registration.
   const allowlist = new Set(allowedCorsOrigins());
   await app.register(cors, {
     origin: (origin, callback) => {

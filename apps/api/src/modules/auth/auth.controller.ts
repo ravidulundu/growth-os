@@ -12,9 +12,9 @@ const verifySchema = z.object({
   token: z.string().min(32)
 });
 
-function authCookieSecure() {
-  const explicit = process.env.AUTH_COOKIE_SECURE;
-  if (explicit !== undefined) {
+export function authCookieSecure() {
+  const explicit = process.env.AUTH_COOKIE_SECURE?.trim();
+  if (explicit) {
     return explicit.toLowerCase() !== "false";
   }
   return process.env.NODE_ENV === "production";

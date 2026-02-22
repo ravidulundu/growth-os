@@ -74,6 +74,30 @@ type XPostMetrics = {
   quotes: number;
 };
 
+const schedulerStates: SchedulerState[] = [
+  "queued",
+  "in_progress",
+  "retry_wait",
+  "completed",
+  "failed_permanent",
+  "cancelled"
+];
+
+function isSchedulerState(value: string): value is SchedulerState {
+  return schedulerStates.includes(value as SchedulerState);
+}
+
+function assertSchedulerState(value: string, context: string): SchedulerState {
+  if (isSchedulerState(value)) {
+    return value;
+  }
+
+  throw Object.assign(new Error(`Invalid scheduler state value '${value}' in ${context}`), {
+    code: "INVALID_SCHEDULER_STATE",
+    transient: false
+  });
+}
+
 function decryptSecret(payload: string) {
   const rawKey = process.env.TOKEN_ENCRYPTION_KEY?.trim();
   if (!rawKey) {
@@ -489,7 +513,7 @@ async function processPublishJob(publishJobId: string) {
       const classified = classifyPublishError(error);
       const stateResult = await recoveryClient.query<{
         attempt_count: number;
-        state: SchedulerState;
+        state: string;
         content_id: string;
         workspace_id: string;
       }>(
@@ -503,7 +527,10 @@ async function processPublishJob(publishJobId: string) {
       }
 
       const attempt = Number(stateResult.rows[0].attempt_count);
-      const currentState = stateResult.rows[0].state;
+      const currentState = assertSchedulerState(
+        stateResult.rows[0].state,
+        "publish error recovery"
+      );
       if (["completed", "failed_permanent", "cancelled"].includes(currentState)) {
         await recoveryClient.query("COMMIT");
         return;
@@ -555,7 +582,7 @@ async function processPublishJob(publishJobId: string) {
           try {
             await enqueueRecoveryClient.query("BEGIN");
             const enqueueStateResult = await enqueueRecoveryClient.query<{
-              state: SchedulerState;
+              state: string;
               content_id: string;
               workspace_id: string;
             }>(
@@ -569,7 +596,10 @@ async function processPublishJob(publishJobId: string) {
             );
 
             if (enqueueStateResult.rows[0]) {
-              const enqueueFailureBaseState = enqueueStateResult.rows[0].state;
+              const enqueueFailureBaseState = assertSchedulerState(
+                enqueueStateResult.rows[0].state,
+                "retry enqueue recovery"
+              );
               if (
                 ["completed", "failed_permanent", "cancelled"].includes(enqueueFailureBaseState)
               ) {

@@ -44,7 +44,7 @@ export class AuthService {
 
   protected async sendMagicLink(email: string, token: string) {
     const appUrl = process.env.APP_URL ?? "http://localhost:3000";
-    const magicLink = `${appUrl}/login?token=${token}`;
+    const magicLink = `${appUrl}/login?token=${encodeURIComponent(token)}`;
     const smtpHost = process.env.SMTP_HOST;
 
     if (!smtpHost) {
