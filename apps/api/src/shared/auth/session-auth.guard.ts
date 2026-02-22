@@ -6,6 +6,7 @@ import {
   UnauthorizedException
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
+import { createHash } from "node:crypto";
 import { getPool } from "../db/pool";
 import { IS_PUBLIC_ROUTE } from "./public.decorator";
 
@@ -119,6 +120,18 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+export function buildSessionTokenLookupCandidates(token: string) {
+  const sha256 = createHash("sha256").update(token).digest();
+  return Array.from(
+    new Set([
+      token,
+      sha256.toString("hex"),
+      sha256.toString("base64"),
+      sha256.toString("base64url")
+    ])
+  );
+}
+
 @Injectable()
 export class SessionAuthGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
@@ -145,18 +158,19 @@ export class SessionAuthGuard implements CanActivate {
     if (!token) {
       throw new UnauthorizedException("Missing or invalid session token");
     }
+    const tokenCandidates = buildSessionTokenLookupCandidates(token);
 
     const pool = getPool();
     const betterAuthSessionResult = await pool.query<{ id: string; user_id: string }>(
       `
         SELECT id, user_id
         FROM better_auth_sessions
-        WHERE token = $1
+        WHERE token = ANY($1::text[])
           AND expires_at > now()
         ORDER BY created_at DESC
         LIMIT 1;
       `,
-      [token]
+      [tokenCandidates]
     );
 
     const session = betterAuthSessionResult.rows[0];

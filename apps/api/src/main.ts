@@ -4,6 +4,8 @@ import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, NestFastifyApplication } from "@nestjs/platform-fastify";
 import cors from "@fastify/cors";
 import { loadEnv } from "./shared/db/env";
+import { closePool } from "./shared/db/pool";
+import { resolveAppOrigins } from "./shared/http/origin-utils";
 
 const LOCAL_DEV_ORIGINS = [
   "http://localhost:3000",
@@ -21,22 +23,7 @@ function allowedCorsOrigins() {
       .filter(Boolean);
   }
 
-  const appUrl = process.env.APP_URL;
-  if (appUrl) {
-    try {
-      const parsed = new URL(appUrl);
-      const isLocalhost = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
-      if (isLocalhost) {
-        return Array.from(new Set([appUrl, ...LOCAL_DEV_ORIGINS]));
-      }
-    } catch {
-      return [appUrl];
-    }
-
-    return [appUrl];
-  }
-
-  return LOCAL_DEV_ORIGINS;
+  return resolveAppOrigins(process.env.APP_URL, LOCAL_DEV_ORIGINS);
 }
 
 async function bootstrap() {
@@ -47,6 +34,13 @@ async function bootstrap() {
     AppModule,
     new FastifyAdapter({ logger: false })
   );
+  app.enableShutdownHooks();
+  app
+    .getHttpAdapter()
+    .getInstance()
+    .addHook("onClose", async () => {
+      await closePool();
+    });
 
   // CORS policy is read once at startup; restart is required after env changes.
   // Keep CORS registration in a single place. Do not call app.enableCors()

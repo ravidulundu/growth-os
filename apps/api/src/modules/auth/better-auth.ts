@@ -2,6 +2,7 @@ import { Logger } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
 import nodemailer from "nodemailer";
 import { getPool } from "../../shared/db/pool";
+import { resolveAppOrigins } from "../../shared/http/origin-utils";
 
 type SignInMagicLinkInput = {
   body: {
@@ -91,7 +92,14 @@ function resolveAuthBaseUrl() {
   return "http://localhost:4000";
 }
 
-function resolveTrustedOrigins() {
+const LOCAL_TRUSTED_ORIGINS = [
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "http://localhost:3010",
+  "http://127.0.0.1:3010"
+];
+
+export function resolveTrustedOrigins() {
   const configured = process.env.CORS_ALLOWED_ORIGINS?.trim();
   if (configured) {
     return configured
@@ -100,19 +108,7 @@ function resolveTrustedOrigins() {
       .filter(Boolean);
   }
 
-  const appUrl = process.env.APP_URL?.trim();
-  const defaultOrigins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:3010",
-    "http://127.0.0.1:3010"
-  ];
-
-  if (!appUrl) {
-    return defaultOrigins;
-  }
-
-  return Array.from(new Set([appUrl, ...defaultOrigins]));
+  return resolveAppOrigins(process.env.APP_URL, LOCAL_TRUSTED_ORIGINS);
 }
 
 function resolveUseSecureCookies() {
@@ -367,7 +363,10 @@ async function createBetterAuthInstance(): Promise<BetterAuthInstance> {
 
 export async function getBetterAuth() {
   if (!authInstancePromise) {
-    authInstancePromise = createBetterAuthInstance();
+    authInstancePromise = createBetterAuthInstance().catch((error) => {
+      authInstancePromise = null;
+      throw error;
+    });
   }
 
   return authInstancePromise;

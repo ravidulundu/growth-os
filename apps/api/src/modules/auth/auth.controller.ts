@@ -14,6 +14,7 @@ import {
 import { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { Public } from "../../shared/auth/public.decorator";
+import { resolveAppOrigins } from "../../shared/http/origin-utils";
 import { getBetterAuth } from "./better-auth";
 import { buildMagicLinkRequestResponse } from "./auth-response";
 
@@ -91,7 +92,7 @@ function deriveDisplayName(email: string, name?: string) {
   return localPart && localPart.length > 0 ? localPart : "user";
 }
 
-function resolveRedirectOrigins() {
+export function resolveRedirectOrigins() {
   const configured = process.env.CORS_ALLOWED_ORIGINS?.trim();
   if (configured) {
     return configured
@@ -100,12 +101,7 @@ function resolveRedirectOrigins() {
       .filter(Boolean);
   }
 
-  const appUrl = process.env.APP_URL?.trim();
-  if (!appUrl) {
-    return LOCAL_REDIRECT_ORIGINS;
-  }
-
-  return Array.from(new Set([appUrl, ...LOCAL_REDIRECT_ORIGINS]));
+  return resolveAppOrigins(process.env.APP_URL, LOCAL_REDIRECT_ORIGINS);
 }
 
 function resolveSafeRedirectTarget(rawTarget?: string) {
