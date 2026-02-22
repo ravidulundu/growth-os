@@ -36,4 +36,8 @@ test("similarity.cosine.threshold.unit", () => {
 
   assert.ok(turkishNear > turkishFar);
   assert.ok(turkishFar < 0.85);
+
+  const shortTokenSimilarity = cosineSimilarity("go", "hi");
+  assert.equal(shortTokenSimilarity, 0);
+  assert.equal(exceedsSimilarityThreshold("go", "hi", 0.8), false);
 });

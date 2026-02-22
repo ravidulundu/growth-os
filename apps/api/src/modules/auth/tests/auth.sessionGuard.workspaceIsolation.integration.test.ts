@@ -81,6 +81,16 @@ test("auth.sessionGuard.workspaceIsolation.integration", async (t) => {
   );
   const accountId = accountResult.rows[0].id;
 
+  const accountWorkspaceBResult = await pool.query<{ id: string }>(
+    `
+      INSERT INTO x_accounts (workspace_id, x_user_id, username, is_active)
+      VALUES ($1, $2, $3, true)
+      RETURNING id;
+    `,
+    [workspaceBId, `guard-x-user-b-${suffix}`, `guard_b_${suffix}`]
+  );
+  const accountWorkspaceBId = accountWorkspaceBResult.rows[0].id;
+
   const contentResult = await pool.query<{ id: string }>(
     `
       INSERT INTO contents (
@@ -183,4 +193,22 @@ test("auth.sessionGuard.workspaceIsolation.integration", async (t) => {
   const resourceAllowed = await guard.canActivate(buildContext(resourceScopedRequest));
   assert.equal(resourceAllowed, true);
   assert.equal(resourceScopedRequest.auth?.workspaceId, workspaceAId);
+
+  const conflictingScopedRequest: GuardRequest = {
+    headers: {
+      authorization: `Bearer ${sessionToken}`
+    },
+    method: "POST",
+    routerPath: "/scheduling/publish-now",
+    body: {
+      contentId,
+      accountId: accountWorkspaceBId
+    }
+  };
+
+  await assert.rejects(
+    () => guard.canActivate(buildContext(conflictingScopedRequest)),
+    (error) =>
+      error instanceof ForbiddenException && error.message.includes("Workspace access denied")
+  );
 });

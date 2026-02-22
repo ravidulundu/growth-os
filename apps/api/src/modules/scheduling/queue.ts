@@ -37,25 +37,21 @@ export function getMetricsQueue() {
 }
 
 export async function closeSchedulingQueues() {
-  const closeActions: Array<Promise<unknown>> = [];
-
   if (publishQueue) {
-    closeActions.push(publishQueue.close());
+    const activePublishQueue = publishQueue;
     publishQueue = undefined;
+    await activePublishQueue.close();
   }
 
   if (metricsQueue) {
-    closeActions.push(metricsQueue.close());
+    const activeMetricsQueue = metricsQueue;
     metricsQueue = undefined;
+    await activeMetricsQueue.close();
   }
 
   if (redisConnection) {
     const activeConnection = redisConnection;
-    closeActions.push(activeConnection.quit().catch(() => activeConnection.disconnect()));
     redisConnection = undefined;
-  }
-
-  if (closeActions.length > 0) {
-    await Promise.all(closeActions);
+    await activeConnection.quit().catch(() => activeConnection.disconnect());
   }
 }

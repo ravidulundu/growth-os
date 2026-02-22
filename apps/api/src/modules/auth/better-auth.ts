@@ -181,7 +181,8 @@ async function sendMagicLink(data: { email: string; url: string }) {
     return;
   }
 
-  const smtpPort = Number(process.env.SMTP_PORT ?? 1025);
+  const smtpPortRaw = Number(process.env.SMTP_PORT ?? 587);
+  const smtpPort = Number.isFinite(smtpPortRaw) && smtpPortRaw > 0 ? smtpPortRaw : 587;
   const smtpUser = process.env.SMTP_USER;
   const smtpPass = process.env.SMTP_PASS;
   const from = process.env.MAGIC_LINK_FROM_EMAIL ?? "no-reply@example.com";

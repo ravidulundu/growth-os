@@ -119,3 +119,81 @@
   - Quotes metriği görünümü eklendi
 - Doğrulama:
   - `pnpm --filter @growth-os/web typecheck` pass
+
+## Next Plan (Billing/Metering Gap)
+
+- [x] Billing servisi ekle: plan limitleri + aylık kullanım hesaplama
+- [x] Generation draft akışına metering enforcement bağla
+- [x] Billing metering endpointlerini ekle
+- [x] Studio Settings görünümüne metering paneli bağla
+- [x] Unit/integration testler ile limit davranışını doğrula
+- [x] API/Web lint + typecheck + ilgili testleri çalıştır
+
+### Billing Gap Progress
+
+- `apps/api/src/modules/billing/billing.service.ts`
+  - Plan bazlı aylık generation limitleri eklendi (`mvp0/free/creator/growth/team`)
+  - Aylık kullanım hesaplama ve 429 limit enforcement eklendi
+- `apps/api/src/modules/billing/billing.controller.ts`
+  - `GET /billing/metering/:workspaceId` endpointi eklendi
+- `apps/api/src/modules/generation/generation.service.ts`
+  - Draft üretim transaction'ına metering enforcement bağlandı
+- `apps/api/src/modules/billing/tests/billing.meteringAndLimit.integration.test.ts`
+  - Free plan limit dolu durumda bloklama ve mvp0 sınırsız davranışı doğrulandı
+- `apps/web/components/studio/views/settings-view.tsx`
+  - Plan/kullanım paneli + `Load Metering` akışı eklendi
+- `apps/web/components/studio/use-studio-controller.ts` + `apps/web/lib/api.ts`
+  - Billing metering API entegrasyonu ve state eklendi
+
+## Next Plan (First-Hour Alerting Gap)
+
+- [x] Analytics servisinde first-hour alert hesaplama ekle
+- [x] First-hour alert endpointini ekle
+- [x] Analytics integration testine alert senaryolarını ekle
+- [x] Studio Analytics görünümüne alert panelini bağla
+- [x] API/Web doğrulamalarını çalıştır
+
+### First-Hour Alert Progress
+
+- `apps/api/src/modules/analytics/analytics.service.ts`
+  - `getFirstHourAlertForContent` eklendi (ok/watch/critical sınıflandırma + nedenler)
+- `apps/api/src/modules/analytics/analytics.controller.ts`
+  - `GET /analytics/content/:workspaceId/:contentId/first-hour-alert` endpointi eklendi
+- `apps/api/src/modules/analytics/tests/analytics.getSnapshots.integration.test.ts`
+  - İyi performans (`ok`) ve kötüleşen metrik (`critical`) senaryoları eklendi
+- `apps/web/lib/api.ts`
+  - `getFirstHourAlert` ve response tipi eklendi
+- `apps/web/components/studio/use-studio-controller.ts`
+  - `firstHourAlert` state + `handleLoadFirstHourAlert` eklendi
+- `apps/web/components/studio/views/analytics-view.tsx`
+  - First-hour alert kartı ve aksiyon butonu eklendi
+
+## Next Plan (PR Review Threads Closure)
+
+- [x] Açık PR review thread listesini çıkar ve tekrar edenleri grupla
+- [x] Kritik/aksiyon gerektiren yorumları kodda düzelt (`runtime-policy`, `session guard`, `auth map`, `smtp`, `queue`, `similarity`, `generation template`)
+- [x] İlgili regresyon testlerini ekle/güncelle
+- [x] Lint + typecheck + unit/integration doğrulamalarını çalıştır
+- [ ] Tek commit + thread reply/resolve adımını tamamla
+
+### PR Review Closure Progress
+
+- `apps/worker/src/runtime-policy.ts`: `real` mode desteklendi, production’da sadece `mock` engeli bırakıldı.
+- `apps/worker/tests/runtime-policy.test.ts`: production `real` mode pozitif testi eklendi.
+- `apps/api/src/shared/auth/session-auth.guard.ts`: aynı request içindeki tüm scoped resource ID’ler için workspace tutarlılığı zorunlu hale getirildi.
+- `apps/api/src/modules/auth/tests/auth.sessionGuard.workspaceIsolation.integration.test.ts`: çapraz-workspace resource kombinasyonuna `Forbidden` regresyon testi eklendi.
+- `apps/api/src/modules/auth/auth.controller.ts`: Better Auth status mapping 1xx/2xx durumlarında 500’e normalize edildi.
+- `apps/api/tests/auth/auth.controller.mapBetterAuthError.unit.test.ts`: status mapping davranışı için unit test eklendi.
+- `apps/api/src/modules/auth/better-auth.ts`: SMTP fallback portu `.env.example` ile uyumlu olacak şekilde 587’ye çekildi.
+- `apps/api/src/modules/generation/generation.service.ts`: `toPromptTemplate` içindeki dead override kaldırıldı, DB satır alanları doğrudan kullanıldı.
+- `apps/api/src/modules/scheduling/queue.ts`: queue close ve Redis quit sıralı hale getirildi.
+- `packages/shared/src/scheduling/similarity.ts`: boş token-union durumunda similarity 0 olacak şekilde düzeltildi.
+- `apps/api/tests/scheduling/similarity.cosine.threshold.unit.test.ts`: kısa/boş token vakası için regresyon assertion eklendi.
+- Doğrulama:
+  - `pnpm --filter @growth-os/worker test` pass
+  - `pnpm --filter @growth-os/api test:unit` pass
+  - `pnpm --filter @growth-os/api exec tsx --test src/modules/auth/tests/auth.sessionGuard.workspaceIsolation.integration.test.ts` pass
+  - `pnpm lint` pass
+  - `pnpm --filter @growth-os/api typecheck` pass
+  - `pnpm --filter @growth-os/worker typecheck` pass
+  - `pnpm --filter @growth-os/shared typecheck` pass

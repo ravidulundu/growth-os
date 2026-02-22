@@ -13,3 +13,4 @@
 - Kullanıcı “dokümanı değiştirme, eksiği implemente et” dediyse test/rapor odaklı yan görevlere sapmadan doğrudan ürün açığını kapat.
 - Kullanıcı açıkça istemedikçe `gh` ile PR thread/review kontrolü başlatma; sadece istenen implementasyon + test doğrulamasına odaklan.
 - Aynı oturumda zaten bilinen kod için tekrar tekrar keşif/analiz komutu çalıştırma; kullanıcı soru sorduğunda doğrudan net durum ve aksiyon ver.
+- PR review fix talebinde yalnız kod düzeltmek yetmez: aynı turda thread reply + resolve adımını da bitirip commit hook bloklarını kaldır.

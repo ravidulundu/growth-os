@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { getPool } from "../../shared/db/pool";
+import { BillingService } from "../billing/billing.service";
 import type { StyleProfile } from "../style/style.service";
 
 export type ContentType = "tweet" | "thread" | "reply" | "quote";
@@ -15,9 +16,11 @@ type PromptTemplate = {
 
 type PromptTemplateRow = {
   name: string;
+  content_type: ContentType;
   system_prompt: string;
   user_prompt_template: string;
   prompt_config: Record<string, unknown> | null;
+  is_active: boolean;
 };
 
 const CTA_PATTERN = /\b(join|try|read|check|follow|share|start|learn)\b/gi;
@@ -186,8 +189,8 @@ function toPromptTemplate(row: PromptTemplateRow): PromptTemplate {
     systemPrompt: row.system_prompt,
     userPromptTemplate: row.user_prompt_template,
     promptConfig: isRecord(row.prompt_config) ? row.prompt_config : {},
-    contentType: "tweet",
-    isActive: true
+    contentType: row.content_type,
+    isActive: row.is_active
   };
 }
 
@@ -399,6 +402,8 @@ export function buildGeneratedText(input: {
 
 @Injectable()
 export class GenerationService {
+  constructor(private readonly billingService: BillingService = new BillingService()) {}
+
   protected dbPool() {
     return getPool();
   }
@@ -430,16 +435,7 @@ export class GenerationService {
     if (!result.rows[0]) {
       return defaultTemplate(type);
     }
-    const row = result.rows[0] as PromptTemplateRow & {
-      content_type: ContentType;
-      is_active: boolean;
-    };
-
-    return {
-      ...toPromptTemplate(row),
-      contentType: row.content_type,
-      isActive: row.is_active
-    };
+    return toPromptTemplate(result.rows[0]);
   }
 
   async listPromptTemplates(workspaceId: string, contentType?: ContentType) {
@@ -594,6 +590,11 @@ export class GenerationService {
     const client = await this.dbPool().connect();
     try {
       await client.query("BEGIN");
+      const metering = await this.billingService.enforceGenerationLimit(
+        params.workspaceId,
+        this.billingService.newTransactionExecutor(client),
+        1
+      );
       const contentResult = await client.query<{ id: string }>(
         `
           INSERT INTO contents (
@@ -643,7 +644,11 @@ export class GenerationService {
         [
           params.workspaceId,
           params.accountId,
-          JSON.stringify({ type: params.type, templateName: template.name })
+          JSON.stringify({
+            type: params.type,
+            templateName: template.name,
+            planKey: metering.planKey
+          })
         ]
       );
 

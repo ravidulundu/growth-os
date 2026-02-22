@@ -14,6 +14,10 @@ test("assertSupportedXClientMode rejects unsupported modes", () => {
   );
 });
 
+test("assertSupportedXClientMode allows real mode in production", () => {
+  assert.doesNotThrow(() => assertSupportedXClientMode({ nodeEnv: "production", mode: "real" }));
+});
+
 test("assertSupportedXClientMode blocks mock mode in production", () => {
   assert.throws(
     () => assertSupportedXClientMode({ nodeEnv: "production", mode: "mock" }),

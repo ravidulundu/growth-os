@@ -147,7 +147,7 @@ function requestAcceptsHtml(request: FastifyRequest) {
   return typeof accept === "string" && accept.includes("text/html");
 }
 
-function mapBetterAuthError(error: unknown): HttpException {
+export function mapBetterAuthError(error: unknown): HttpException {
   if (error instanceof HttpException) {
     return error;
   }
@@ -163,7 +163,9 @@ function mapBetterAuthError(error: unknown): HttpException {
       ? 500
       : rawStatusCode >= 300 && rawStatusCode < 400
         ? 401
-        : rawStatusCode;
+        : rawStatusCode >= 400 && rawStatusCode < 600
+          ? rawStatusCode
+          : 500;
 
   const maybeBodyMessage = (error as { body?: { message?: unknown } }).body?.message;
   const maybeMessage = (error as { message?: unknown }).message;
@@ -176,7 +178,7 @@ function mapBetterAuthError(error: unknown): HttpException {
     return new HttpException("Invalid or expired magic link token", statusCode);
   }
 
-  if (!rawStatusCode) {
+  if (statusCode === 500) {
     return new InternalServerErrorException(message);
   }
 

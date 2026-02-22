@@ -20,7 +20,7 @@ export function cosineSimilarity(left: string, right: string) {
 
   const union = new Set([...leftVector.keys(), ...rightVector.keys()]);
   if (union.size === 0) {
-    return 1;
+    return 0;
   }
 
   let dot = 0;

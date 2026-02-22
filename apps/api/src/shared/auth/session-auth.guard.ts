@@ -230,7 +230,17 @@ export class SessionAuthGuard implements CanActivate {
         scopedResourceIds.publishedPostId
     );
 
-    let derivedWorkspaceId: string | null = null;
+    const scopedWorkspaceIds = new Set<string>();
+    const registerScopedWorkspaceId = (workspaceId: string | null) => {
+      if (!workspaceId) {
+        throw new ForbiddenException("Workspace access denied");
+      }
+      scopedWorkspaceIds.add(workspaceId);
+      if (scopedWorkspaceIds.size > 1) {
+        throw new ForbiddenException("Workspace access denied");
+      }
+    };
+
     if (scopedResourceIds.contentId) {
       if (!isUuid(scopedResourceIds.contentId)) {
         throw new ForbiddenException("Workspace access denied");
@@ -244,10 +254,10 @@ export class SessionAuthGuard implements CanActivate {
         `,
         [scopedResourceIds.contentId]
       );
-      derivedWorkspaceId = contentWorkspaceResult.rows[0]?.workspace_id ?? null;
+      registerScopedWorkspaceId(contentWorkspaceResult.rows[0]?.workspace_id ?? null);
     }
 
-    if (!derivedWorkspaceId && scopedResourceIds.accountId) {
+    if (scopedResourceIds.accountId) {
       if (!isUuid(scopedResourceIds.accountId)) {
         throw new ForbiddenException("Workspace access denied");
       }
@@ -260,10 +270,10 @@ export class SessionAuthGuard implements CanActivate {
         `,
         [scopedResourceIds.accountId]
       );
-      derivedWorkspaceId = accountWorkspaceResult.rows[0]?.workspace_id ?? null;
+      registerScopedWorkspaceId(accountWorkspaceResult.rows[0]?.workspace_id ?? null);
     }
 
-    if (!derivedWorkspaceId && scopedResourceIds.publishJobId) {
+    if (scopedResourceIds.publishJobId) {
       if (!isUuid(scopedResourceIds.publishJobId)) {
         throw new ForbiddenException("Workspace access denied");
       }
@@ -276,10 +286,10 @@ export class SessionAuthGuard implements CanActivate {
         `,
         [scopedResourceIds.publishJobId]
       );
-      derivedWorkspaceId = publishJobWorkspaceResult.rows[0]?.workspace_id ?? null;
+      registerScopedWorkspaceId(publishJobWorkspaceResult.rows[0]?.workspace_id ?? null);
     }
 
-    if (!derivedWorkspaceId && scopedResourceIds.publishedPostId) {
+    if (scopedResourceIds.publishedPostId) {
       if (!isUuid(scopedResourceIds.publishedPostId)) {
         throw new ForbiddenException("Workspace access denied");
       }
@@ -292,9 +302,10 @@ export class SessionAuthGuard implements CanActivate {
         `,
         [scopedResourceIds.publishedPostId]
       );
-      derivedWorkspaceId = publishedWorkspaceResult.rows[0]?.workspace_id ?? null;
+      registerScopedWorkspaceId(publishedWorkspaceResult.rows[0]?.workspace_id ?? null);
     }
 
+    const derivedWorkspaceId = scopedWorkspaceIds.values().next().value ?? null;
     if (explicitWorkspaceId && derivedWorkspaceId && explicitWorkspaceId !== derivedWorkspaceId) {
       throw new ForbiddenException("Workspace access denied");
     }

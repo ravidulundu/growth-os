@@ -10,7 +10,7 @@ export function assertSupportedXClientMode(input: { nodeEnv?: string; mode?: str
     throw new Error("X_CLIENT_MODE=mock is not allowed in production worker.");
   }
 
-  if (normalizedMode !== "mock") {
+  if (normalizedMode !== "mock" && normalizedMode !== "real") {
     throw new Error(`Unsupported worker X client mode: ${normalizedMode}`);
   }
 }
