@@ -6,9 +6,10 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
-    "test": "node -e \"console.log('No api tests yet')\"",
+    "test": "tsx --test tests/**/*.test.ts",
     "db:migrate": "tsx src/shared/db/migrate.ts",
-    "db:seed": "tsx src/shared/db/seed.ts"
+    "db:seed": "tsx src/shared/db/seed.ts",
+    "db:cleanup:magic-links": "tsx src/shared/db/cleanup-magic-links.ts"
   },
   "dependencies": {
     "@fastify/cors": "9.0.1",
@@ -17,12 +18,14 @@
     "@nestjs/platform-fastify": "10.4.15",
     "dotenv": "16.4.7",
     "fastify": "4.28.1",
+    "nodemailer": "6.9.16",
     "pg": "8.13.1",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.1",
     "zod": "3.24.1"
   },
   "devDependencies": {
+    "@types/nodemailer": "6.4.17",
     "@types/node": "22.10.1",
     "@types/pg": "8.11.11",
     "tsx": "4.19.2",

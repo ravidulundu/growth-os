@@ -1,33 +1,148 @@
-import { Injectable, UnauthorizedException } from "@nestjs/common";
+import {
+  HttpException,
+  HttpStatus,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  UnauthorizedException
+} from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
+import nodemailer from "nodemailer";
 import { getPool } from "../../shared/db/pool";
+
+export type MagicLinkRequestResponse = {
+  ok: true;
+  message: string;
+};
+
+export function buildMagicLinkRequestResponse(): MagicLinkRequestResponse {
+  return {
+    ok: true,
+    message: "If the email is eligible, a magic link will be sent."
+  };
+}
+
+export function buildSessionToken() {
+  const token = randomBytes(32).toString("hex");
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  return { token, tokenHash };
+}
+
+function canLogMagicLinkToConsole() {
+  return process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
+}
 
 @Injectable()
 export class AuthService {
+  protected dbPool() {
+    return getPool();
+  }
+
+  protected async sendMagicLink(email: string, token: string) {
+    const appUrl = process.env.APP_URL ?? "http://localhost:3000";
+    const magicLink = `${appUrl}/login?token=${token}`;
+    const smtpHost = process.env.SMTP_HOST;
+
+    if (!smtpHost) {
+      if (!canLogMagicLinkToConsole()) {
+        throw new InternalServerErrorException("Magic link delivery is not configured");
+      }
+
+      Logger.log(`[auth] dev magic link for ${email}: ${magicLink}`, "AuthService");
+      return;
+    }
+
+    const smtpPort = Number(process.env.SMTP_PORT ?? 1025);
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS;
+    const from = process.env.MAGIC_LINK_FROM_EMAIL ?? "no-reply@example.com";
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: false,
+      auth: smtpUser && smtpPass ? { user: smtpUser, pass: smtpPass } : undefined
+    });
+
+    await transporter.sendMail({
+      from,
+      to: email,
+      subject: "Your Growth OS magic link",
+      text: `Use this link to sign in: ${magicLink}`
+    });
+  }
+
+  protected async createMagicLinkToken(email: string, tokenHash: string) {
+    const rawLimit = Number(process.env.AUTH_MAGIC_LINK_MAX_REQUESTS_PER_HOUR ?? 5);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 5;
+    const client = await this.dbPool().connect();
+
+    try {
+      await client.query("BEGIN");
+      // Serialize requests per email to prevent TOCTOU bypass on count+insert checks.
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [email]);
+
+      const countResult = await client.query<{ request_count: number }>(
+        `
+          SELECT COUNT(*)::int AS request_count
+          FROM magic_link_tokens
+          WHERE email = $1
+            AND created_at > now() - interval '1 hour';
+        `,
+        [email]
+      );
+
+      const requestCount = Number(countResult.rows[0]?.request_count ?? 0);
+      if (requestCount >= limit) {
+        throw new HttpException(
+          "Too many magic link requests. Please try again later.",
+          HttpStatus.TOO_MANY_REQUESTS
+        );
+      }
+
+      await client.query(
+        `
+          INSERT INTO magic_link_tokens (email, token_hash, expires_at)
+          VALUES ($1, $2, now() + interval '15 minutes');
+        `,
+        [email, tokenHash]
+      );
+
+      await client.query("COMMIT");
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        Logger.error(
+          "Failed to rollback createMagicLinkToken transaction",
+          rollbackError,
+          "AuthService"
+        );
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async requestMagicLink(emailInput: string) {
     const email = emailInput.toLowerCase().trim();
     const token = randomBytes(24).toString("hex");
     const tokenHash = createHash("sha256").update(token).digest("hex");
+    await this.createMagicLinkToken(email, tokenHash);
 
-    await getPool().query(
-      `
-        INSERT INTO magic_link_tokens (email, token_hash, expires_at)
-        VALUES ($1, $2, now() + interval '15 minutes');
-      `,
-      [email, tokenHash]
-    );
+    try {
+      await this.sendMagicLink(email, token);
+    } catch (error) {
+      await this.dbPool().query("DELETE FROM magic_link_tokens WHERE token_hash = $1", [tokenHash]);
+      throw error;
+    }
 
-    const appUrl = process.env.APP_URL ?? "http://localhost:3000";
-    return {
-      ok: true,
-      message: "Magic link generated (stub)",
-      magicLink: `${appUrl}/login?token=${token}`
-    };
+    return buildMagicLinkRequestResponse();
   }
 
   async verifyMagicLink(rawToken: string) {
     const tokenHash = createHash("sha256").update(rawToken).digest("hex");
-    const client = await getPool().connect();
+    const client = await this.dbPool().connect();
 
     try {
       await client.query("BEGIN");
@@ -66,14 +181,31 @@ export class AuthService {
         [tokenRow.email, emailHash]
       );
 
+      const { token: sessionToken, tokenHash: sessionTokenHash } = buildSessionToken();
+      await client.query(
+        `
+          INSERT INTO auth_sessions (user_id, token_hash, expires_at)
+          VALUES ($1, $2, now() + interval '30 days');
+        `,
+        [userResult.rows[0].id, sessionTokenHash]
+      );
+
       await client.query("COMMIT");
       return {
         ok: true,
         userId: userResult.rows[0].id,
-        sessionToken: randomBytes(32).toString("hex")
+        sessionToken
       };
     } catch (error) {
-      await client.query("ROLLBACK");
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        Logger.error(
+          "Failed to rollback verifyMagicLink transaction",
+          rollbackError,
+          "AuthService"
+        );
+      }
       throw error;
     } finally {
       client.release();

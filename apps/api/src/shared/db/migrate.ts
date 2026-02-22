@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { getPool } from "./pool";
+import { closePool, getPool } from "./pool";
 import { findRepoRoot } from "./repo-root";
 import { loadEnv } from "./env";
 
@@ -33,7 +33,11 @@ async function applyMigration(fileName: string, sql: string) {
     await client.query("INSERT INTO schema_migrations(file_name) VALUES ($1)", [fileName]);
     await client.query("COMMIT");
   } catch (error) {
-    await client.query("ROLLBACK");
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      console.error("Migration rollback failed", rollbackError);
+    }
     throw error;
   } finally {
     client.release();
@@ -42,9 +46,7 @@ async function applyMigration(fileName: string, sql: string) {
 
 async function main() {
   const root = findRepoRoot();
-  const strictDir = path.join(root, "packages", "db", "migrations");
-  const legacyDir = path.join(root, "db", "migrations");
-  const migrationsDir = fs.existsSync(strictDir) ? strictDir : legacyDir;
+  const migrationsDir = path.join(root, "packages", "db", "migrations");
   const files = fs
     .readdirSync(migrationsDir)
     .filter((file) => file.endsWith(".sql"))
@@ -64,11 +66,11 @@ async function main() {
   }
 
   console.log("Migration complete");
-  await getPool().end();
+  await closePool();
 }
 
 main().catch(async (error) => {
   console.error("Migration failed", error);
-  await getPool().end();
+  await closePool();
   process.exit(1);
 });

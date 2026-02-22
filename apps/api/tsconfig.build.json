@@ -4,5 +4,5 @@
     "declaration": false,
     "sourceMap": true
   },
-  "exclude": ["**/*.spec.ts"]
+  "exclude": ["**/*.spec.ts", "**/*.test.ts"]
 }

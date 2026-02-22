@@ -5,14 +5,8 @@ export function findRepoRoot(startDir = process.cwd()): string {
   let current = path.resolve(startDir);
 
   while (true) {
-    const strictCandidate = path.join(current, "packages", "db", "migrations");
-    if (fs.existsSync(strictCandidate)) {
-      return current;
-    }
-
-    // Backward compatibility for older layout.
-    const legacyCandidate = path.join(current, "db", "migrations");
-    if (fs.existsSync(legacyCandidate)) {
+    const migrationsCandidate = path.join(current, "packages", "db", "migrations");
+    if (fs.existsSync(migrationsCandidate)) {
       return current;
     }
 

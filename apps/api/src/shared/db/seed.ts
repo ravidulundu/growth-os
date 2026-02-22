@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { getPool } from "./pool";
+import { closePool, getPool } from "./pool";
 import { loadEnv } from "./env";
 
 loadEnv();
@@ -38,11 +38,11 @@ async function main() {
   );
 
   console.log("Seed complete: founder@example.com / Personal Workspace");
-  await pool.end();
+  await closePool();
 }
 
 main().catch(async (error) => {
   console.error("Seed failed", error);
-  await getPool().end();
+  await closePool();
   process.exit(1);
 });

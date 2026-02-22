@@ -5,6 +5,7 @@ import IORedis from "ioredis";
 config();
 
 const redisUrl = process.env.REDIS_URL ?? "redis://localhost:56379";
+// BullMQ duplicates this ioredis client for blocking consumers internally.
 const connection = new IORedis(redisUrl, {
   maxRetriesPerRequest: null,
   enableReadyCheck: true
@@ -42,9 +43,29 @@ worker.on("error", (error) => {
   console.error("[worker] error", error);
 });
 
-process.on("SIGINT", async () => {
-  await worker.close();
-  await events.close();
-  await connection.quit();
-  process.exit(0);
+let shuttingDown = false;
+
+const shutdown = async (signal: string) => {
+  if (shuttingDown) {
+    return;
+  }
+
+  shuttingDown = true;
+  try {
+    console.log(`[worker] received ${signal}, shutting down gracefully`);
+    await worker.close();
+    await events.close();
+    await connection.quit();
+    process.exit(0);
+  } catch (error) {
+    console.error("[worker] shutdown failed", error);
+    process.exit(1);
+  }
+};
+
+process.on("SIGINT", () => {
+  void shutdown("SIGINT");
+});
+process.on("SIGTERM", () => {
+  void shutdown("SIGTERM");
 });

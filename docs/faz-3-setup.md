@@ -73,7 +73,7 @@ Başarılı çalıştırılan komutlar:
 HTTP doğrulama:
 
 - `GET /health` -> `{"status":"ok"...}`
-- `POST /auth/magic-link/request` -> magic link döndü
+- `POST /auth/magic-link/request` -> generic ACK (`ok:true`, token/link yok)
 - `POST /auth/magic-link/verify` -> `ok:true` + `sessionToken`
 
 ## Not

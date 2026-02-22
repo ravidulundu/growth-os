@@ -6,11 +6,11 @@
     "build": "next build",
     "start": "sh -c 'next start -p ${WEB_PORT:-3000}'",
     "typecheck": "tsc --noEmit",
-    "test": "node -e \"console.log('No web tests yet')\""
+    "test": "node --test tests/**/*.test.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "5.64.1",
-    "next": "15.0.4",
+    "next": "16.1.6",
     "react": "19.0.0",
     "react-dom": "19.0.0"
   },

@@ -11,3 +11,13 @@ export function getPool() {
 
   return pool;
 }
+
+export async function closePool() {
+  if (!pool) {
+    return;
+  }
+
+  const currentPool = pool;
+  pool = undefined;
+  await currentPool.end();
+}

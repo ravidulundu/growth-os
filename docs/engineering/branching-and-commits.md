@@ -10,6 +10,8 @@
   - `chore/*`
   - `refactor/*`
   - `docs/*`
+  - `perf/*`
+  - `build/*`
 
 Examples:
 
