@@ -14,3 +14,5 @@
 - Kullanıcı açıkça istemedikçe `gh` ile PR thread/review kontrolü başlatma; sadece istenen implementasyon + test doğrulamasına odaklan.
 - Aynı oturumda zaten bilinen kod için tekrar tekrar keşif/analiz komutu çalıştırma; kullanıcı soru sorduğunda doğrudan net durum ve aksiyon ver.
 - PR review fix talebinde yalnız kod düzeltmek yetmez: aynı turda thread reply + resolve adımını da bitirip commit hook bloklarını kaldır.
+- `--no-verify` sadece acil ve açık kullanıcı onayıyla kullanılmalı; standart akışta quality gate’i gerçekten geçirip push yapmak zorunlu.
+- CI fail analizi yaparken local unstaged dosyaların etkisi ile remote commit durumunu karıştırma; PR check loguna göre kök nedeni net ayır.

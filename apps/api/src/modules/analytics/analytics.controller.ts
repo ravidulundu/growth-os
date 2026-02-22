@@ -20,4 +20,12 @@ export class AnalyticsController {
   ) {
     return this.analyticsService.getSnapshotsForContent(workspaceId, contentId);
   }
+
+  @Get("content/:workspaceId/:contentId/first-hour-alert")
+  async firstHourAlert(
+    @Param("workspaceId") workspaceId: string,
+    @Param("contentId") contentId: string
+  ) {
+    return this.analyticsService.getFirstHourAlertForContent(workspaceId, contentId);
+  }
 }

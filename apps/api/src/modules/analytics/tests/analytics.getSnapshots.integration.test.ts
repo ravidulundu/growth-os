@@ -120,6 +120,30 @@ test("analytics.getSnapshots.integration", async (t) => {
   assert.equal(byContent.publishedPostId, publishedPostId);
   assert.equal(byContent.externalPostId, `x-post-${suffix}`);
 
+  const firstHour = await service.getFirstHourAlertForContent(workspaceId, contentId);
+  assert.equal(firstHour.level, "ok");
+  assert.equal(firstHour.windowKey, "t60");
+  assert.ok(firstHour.engagementRate > 0);
+
+  await pool.query(
+    `
+      UPDATE post_metric_snapshots
+      SET impressions = 50,
+          likes = 1,
+          replies = 0,
+          reposts = 0,
+          quotes = 0
+      WHERE workspace_id = $1
+        AND published_post_id = $2
+        AND window_key = 't60';
+    `,
+    [workspaceId, publishedPostId]
+  );
+
+  const degraded = await service.getFirstHourAlertForContent(workspaceId, contentId);
+  assert.equal(degraded.level, "critical");
+  assert.ok(degraded.reasons.length > 0);
+
   await assert.rejects(
     () => service.getSnapshotsForPublishedPost(workspaceId, "00000000-0000-4000-8000-000000000000"),
     (error) => error instanceof NotFoundException

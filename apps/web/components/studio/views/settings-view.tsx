@@ -108,6 +108,60 @@ export function SettingsView({ controller }: SettingsViewProps) {
           ) : null}
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Plan and Metering</CardTitle>
+          <CardDescription>Current plan limits and monthly generation usage.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => void controller.handleLoadMetering()}
+              disabled={!controller.workspaceId || controller.activeAction !== null}
+            >
+              {controller.activeAction === "Load Metering" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : null}
+              Load Metering
+            </Button>
+          </div>
+
+          {controller.metering ? (
+            <div className="grid gap-2 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3 text-sm text-[var(--foreground)]">
+              <p>
+                Plan: <strong>{controller.metering.planKey}</strong>
+              </p>
+              <p>
+                Monthly limit:{" "}
+                <strong>
+                  {controller.metering.monthlyGenerationLimit === null
+                    ? "Unlimited"
+                    : controller.metering.monthlyGenerationLimit}
+                </strong>
+              </p>
+              <p>
+                Used: <strong>{controller.metering.usedUnits}</strong>
+              </p>
+              <p>
+                Remaining:{" "}
+                <strong>
+                  {controller.metering.remainingUnits === null
+                    ? "Unlimited"
+                    : controller.metering.remainingUnits}
+                </strong>
+              </p>
+              <p className="text-xs text-[var(--muted-foreground)]">
+                Period: {new Date(controller.metering.periodStart).toLocaleDateString()} -{" "}
+                {new Date(controller.metering.periodEnd).toLocaleDateString()}
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm text-[var(--muted-foreground)]">No metering data loaded.</p>
+          )}
+        </CardContent>
+      </Card>
     </>
   );
 }

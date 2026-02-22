@@ -194,6 +194,33 @@ export type AnalyticsResponse = {
   snapshots: AnalyticsSnapshot[];
 };
 
+export type FirstHourAlertResponse = {
+  publishedPostId: string;
+  externalPostId: string;
+  windowKey: string;
+  capturedAt: string;
+  impressions: number;
+  engagement: number;
+  engagementRate: number;
+  level: "ok" | "watch" | "critical";
+  reasons: string[];
+  thresholds: {
+    minImpressions: number;
+    minEngagementRate: number;
+    criticalImpressions: number;
+    criticalEngagementRate: number;
+  };
+};
+
+export type BillingMeteringResponse = {
+  planKey: string;
+  monthlyGenerationLimit: number | null;
+  usedUnits: number;
+  remainingUnits: number | null;
+  periodStart: string;
+  periodEnd: string;
+};
+
 export async function fetchHealth() {
   return requestJson<HealthResponse>("/health", { method: "GET", credentials: "omit" });
 }
@@ -329,6 +356,21 @@ export async function listJobs(workspaceId: string) {
 
 export async function getAnalyticsByContent(workspaceId: string, contentId: string) {
   return requestJson<AnalyticsResponse>(`/analytics/content/${workspaceId}/${contentId}`, {
+    method: "GET"
+  });
+}
+
+export async function getFirstHourAlert(workspaceId: string, contentId: string) {
+  return requestJson<FirstHourAlertResponse>(
+    `/analytics/content/${workspaceId}/${contentId}/first-hour-alert`,
+    {
+      method: "GET"
+    }
+  );
+}
+
+export async function getBillingMetering(workspaceId: string) {
+  return requestJson<BillingMeteringResponse>(`/billing/metering/${workspaceId}`, {
     method: "GET"
   });
 }

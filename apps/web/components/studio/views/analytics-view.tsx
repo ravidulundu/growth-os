@@ -62,7 +62,41 @@ export function AnalyticsView({ controller }: AnalyticsViewProps) {
             ) : null}
             Load Analytics
           </Button>
+          <Button
+            variant="secondary"
+            onClick={() => void controller.handleLoadFirstHourAlert()}
+            disabled={
+              !controller.workspaceId || !controller.contentId || controller.activeAction !== null
+            }
+          >
+            {controller.activeAction === "Load First-Hour Alert" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : null}
+            Load First-Hour Alert
+          </Button>
         </div>
+
+        {controller.firstHourAlert ? (
+          <article className="mb-4 rounded-xl border border-[var(--border)] bg-[var(--background)] p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--muted-foreground)]">
+              First-Hour Alert
+            </p>
+            <p className="mt-2 text-xl font-semibold text-[var(--foreground)]">
+              {controller.firstHourAlert.level.toUpperCase()}
+            </p>
+            <p className="text-sm text-[var(--muted-foreground)]">
+              Engagement rate: {(controller.firstHourAlert.engagementRate * 100).toFixed(2)}%
+            </p>
+            <p className="text-sm text-[var(--muted-foreground)]">
+              Impressions: {controller.firstHourAlert.impressions}
+            </p>
+            {controller.firstHourAlert.reasons.length > 0 ? (
+              <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+                Reasons: {controller.firstHourAlert.reasons.join(", ")}
+              </p>
+            ) : null}
+          </article>
+        ) : null}
 
         {snapshots.length > 0 ? (
           <>

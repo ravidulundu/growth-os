@@ -197,3 +197,42 @@
   - `pnpm --filter @growth-os/api typecheck` pass
   - `pnpm --filter @growth-os/worker typecheck` pass
   - `pnpm --filter @growth-os/shared typecheck` pass
+
+## Next Plan (Security Audit Remediation: Nest/Fastify/Nodemailer Upgrade)
+
+- [x] CI `dependency_audit` ve `typecheck` fail nedenlerini netleştir
+- [x] `apps/api` bağımlılıklarını Nest 11 + Fastify 5 + Nodemailer 7 seviyesine yükselt
+- [x] Fastify 5 uyumu için redirect ve CORS method ayarlarını güncelle
+- [x] Eksik billing modülü ve bağlı analytics/web değişikliklerini projeye dahil et
+- [x] Tam kalite kapısını (`quality:gate:push`) lokal bypass olmadan çalıştır
+
+### Security Upgrade Progress
+
+- `apps/api/package.json`
+  - `@nestjs/common/core/platform-fastify` -> `11.1.14`
+  - `fastify` -> `5.7.4`
+  - `@fastify/cors` -> `11.2.0`
+  - `nodemailer` -> `7.0.11`
+  - `@types/nodemailer` -> `7.0.11`
+- `apps/api/src/modules/auth/auth.controller.ts`
+  - Fastify 5 redirect imzasına uyum için `response.redirect(url, statusCode)` formatına geçildi.
+- `apps/api/src/main.ts`
+  - CORS config'e `methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"]` eklendi.
+- `apps/api/src/modules/billing/*` + `apps/api/src/app.module.ts`
+  - Billing service/controller/test eklendi ve module provider/controller listesine bağlandı.
+- `apps/api/src/modules/analytics/*` + `apps/web/*`
+  - First-hour alert + metering UI/API bağlantıları projeye dahil edildi.
+- `pnpm-lock.yaml`
+  - Yükseltilen paketler için lockfile güncellendi.
+
+### Validation (No Bypass)
+
+- `pnpm audit --prod --audit-level high` -> pass (`No known vulnerabilities found`)
+- `pnpm format:check` -> pass
+- `pnpm lint` -> pass
+- `pnpm typecheck` -> pass
+- `pnpm test:unit` -> pass
+- `pnpm test:integration` -> pass
+- `pnpm --filter @growth-os/api build` -> pass
+- `pnpm --filter @growth-os/worker build` -> pass
+- `pnpm quality:gate:push` -> pass

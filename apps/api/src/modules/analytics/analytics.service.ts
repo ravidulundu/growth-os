@@ -1,6 +1,35 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { getPool } from "../../shared/db/pool";
 
+type AlertLevel = "ok" | "watch" | "critical";
+
+type FirstHourAlert = {
+  publishedPostId: string;
+  externalPostId: string;
+  windowKey: string;
+  capturedAt: string;
+  impressions: number;
+  engagement: number;
+  engagementRate: number;
+  level: AlertLevel;
+  reasons: string[];
+  thresholds: {
+    minImpressions: number;
+    minEngagementRate: number;
+    criticalImpressions: number;
+    criticalEngagementRate: number;
+  };
+};
+
+function envNumber(key: string, fallback: number) {
+  const raw = process.env[key];
+  if (!raw) {
+    return fallback;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 @Injectable()
 export class AnalyticsService {
   protected dbPool() {
@@ -73,5 +102,69 @@ export class AnalyticsService {
     }
 
     return this.getSnapshotsForPublishedPost(workspaceId, published.rows[0].id);
+  }
+
+  async getFirstHourAlertForContent(
+    workspaceId: string,
+    contentId: string
+  ): Promise<FirstHourAlert> {
+    const snapshotResult = await this.getSnapshotsForContent(workspaceId, contentId);
+    const firstHourSnapshot =
+      snapshotResult.snapshots.find((snapshot) => snapshot.window_key === "t60") ??
+      snapshotResult.snapshots[snapshotResult.snapshots.length - 1];
+
+    if (!firstHourSnapshot) {
+      throw new NotFoundException("No metrics snapshots found for published post");
+    }
+
+    const minImpressions = envNumber("FIRST_HOUR_ALERT_MIN_IMPRESSIONS", 250);
+    const minEngagementRate = envNumber("FIRST_HOUR_ALERT_MIN_ENGAGEMENT_RATE", 0.03);
+    const criticalImpressions = envNumber("FIRST_HOUR_ALERT_CRITICAL_IMPRESSIONS", 100);
+    const criticalEngagementRate = envNumber("FIRST_HOUR_ALERT_CRITICAL_ENGAGEMENT_RATE", 0.015);
+
+    const engagement =
+      firstHourSnapshot.likes +
+      firstHourSnapshot.replies +
+      firstHourSnapshot.reposts +
+      firstHourSnapshot.quotes;
+    const engagementRate =
+      firstHourSnapshot.impressions > 0 ? engagement / firstHourSnapshot.impressions : 0;
+
+    const reasons: string[] = [];
+    let level: AlertLevel = "ok";
+
+    if (firstHourSnapshot.impressions < criticalImpressions) {
+      level = "critical";
+      reasons.push("critical_impressions");
+    } else if (firstHourSnapshot.impressions < minImpressions) {
+      level = "watch";
+      reasons.push("low_impressions");
+    }
+
+    if (engagementRate < criticalEngagementRate) {
+      level = "critical";
+      reasons.push("critical_engagement_rate");
+    } else if (engagementRate < minEngagementRate && level !== "critical") {
+      level = "watch";
+      reasons.push("low_engagement_rate");
+    }
+
+    return {
+      publishedPostId: snapshotResult.publishedPostId,
+      externalPostId: snapshotResult.externalPostId,
+      windowKey: firstHourSnapshot.window_key,
+      capturedAt: firstHourSnapshot.captured_at,
+      impressions: firstHourSnapshot.impressions,
+      engagement,
+      engagementRate: Number(engagementRate.toFixed(4)),
+      level,
+      reasons,
+      thresholds: {
+        minImpressions,
+        minEngagementRate,
+        criticalImpressions,
+        criticalEngagementRate
+      }
+    };
   }
 }

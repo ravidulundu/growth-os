@@ -55,7 +55,8 @@ async function bootstrap() {
 
       callback(null, false);
     },
-    credentials: true
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
   });
 
   const port = Number(process.env.API_PORT ?? 4000);

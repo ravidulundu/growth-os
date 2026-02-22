@@ -263,14 +263,14 @@ export class AuthController {
       payload.callbackURL ?? payload.newUserCallbackURL
     );
     if (redirectTarget) {
-      response.redirect(302, redirectTarget);
+      response.redirect(redirectTarget, 302);
       return;
     }
 
     if (requestAcceptsHtml(request)) {
       const appFallback = resolveSafeRedirectTarget(process.env.APP_URL);
       if (appFallback) {
-        response.redirect(302, appFallback);
+        response.redirect(appFallback, 302);
         return;
       }
     }

@@ -15,7 +15,9 @@ import {
   API_BASE_URL,
   type Account,
   type AnalyticsResponse,
+  type BillingMeteringResponse,
   type CreateDraftResponse,
+  type FirstHourAlertResponse,
   type HealthResponse,
   type JobRow,
   type MagicLinkRequestResponse,
@@ -31,6 +33,8 @@ import {
   fetchHealth,
   fetchAuthSession,
   getAnalyticsByContent,
+  getBillingMetering,
+  getFirstHourAlert,
   getStyle,
   ingestTimeline,
   listJobs,
@@ -96,6 +100,8 @@ export function useStudioController() {
   const [publishResult, setPublishResult] = useState<PublishNowResponse | null>(null);
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
+  const [firstHourAlert, setFirstHourAlert] = useState<FirstHourAlertResponse | null>(null);
+  const [metering, setMetering] = useState<BillingMeteringResponse | null>(null);
 
   const hasUnsavedDraft = Boolean(contentId && draftText !== savedText);
 
@@ -451,6 +457,32 @@ export function useStudioController() {
     });
   };
 
+  const handleLoadFirstHourAlert = async () => {
+    if (!workspaceId || !contentId) {
+      setNotice({ tone: "error", text: "Workspace and content are required." });
+      return;
+    }
+
+    await runAction("Load First-Hour Alert", async () => {
+      const result = await getFirstHourAlert(workspaceId, contentId);
+      setFirstHourAlert(result);
+      return result;
+    });
+  };
+
+  const handleLoadMetering = async () => {
+    if (!workspaceId) {
+      setNotice({ tone: "error", text: "Workspace ID is required." });
+      return;
+    }
+
+    await runAction("Load Metering", async () => {
+      const result = await getBillingMetering(workspaceId);
+      setMetering(result);
+      return result;
+    });
+  };
+
   const stats = useMemo<StudioStat[]>(
     () => [
       {
@@ -529,6 +561,8 @@ export function useStudioController() {
     publishResult,
     jobs,
     analytics,
+    firstHourAlert,
+    metering,
 
     hasUnsavedDraft,
     stats,
@@ -547,7 +581,9 @@ export function useStudioController() {
     handleLoadVersions,
     handlePublishNow,
     handleLoadJobs,
-    handleLoadAnalytics
+    handleLoadAnalytics,
+    handleLoadFirstHourAlert,
+    handleLoadMetering
   };
 }
 

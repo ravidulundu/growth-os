@@ -4,6 +4,8 @@ import { AnalyticsController } from "./modules/analytics/analytics.controller";
 import { AnalyticsService } from "./modules/analytics/analytics.service";
 import { AuthController } from "./modules/auth/auth.controller";
 import { AuthSessionController } from "./modules/auth/auth-session.controller";
+import { BillingController } from "./modules/billing/billing.controller";
+import { BillingService } from "./modules/billing/billing.service";
 import { GenerationController } from "./modules/generation/generation.controller";
 import { GenerationService } from "./modules/generation/generation.service";
 import { SchedulingController } from "./modules/scheduling/scheduling.controller";
@@ -21,6 +23,7 @@ import { HealthController } from "./shared/health/health.controller";
     HealthController,
     AuthController,
     AuthSessionController,
+    BillingController,
     XIntegrationController,
     StyleController,
     GenerationController,
@@ -34,6 +37,7 @@ import { HealthController } from "./shared/health/health.controller";
     },
     XIntegrationService,
     StyleService,
+    BillingService,
     GenerationService,
     SchedulingService,
     AnalyticsService
