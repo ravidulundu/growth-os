@@ -41,6 +41,10 @@ Not: `3000` doluysa `WEB_PORT=3010 pnpm dev` ile web portunu override edebilirsi
 - `pnpm lint`: ESLint
 - `pnpm format`: Prettier write
 - `pnpm format:check`: Prettier check
+- `pnpm test:unit`: unit testler
+- `pnpm test:integration`: integration testler
+- `pnpm coverage:api`: API coverage gate (%70+)
+- `pnpm quality:gate`: lint + typecheck + unit + integration + coverage + build
 
 ## MVP-0 API Akışı (Local)
 
@@ -69,6 +73,7 @@ Mail testi için MailHog'u profile ile ayağa kaldır:
 ## Engineering Rules
 
 - Engineering docs index: `docs/engineering/README.md`
+- Test strategy: `docs/engineering/test-strategy-and-quality-gates.md`
 - Branch check (local): `pnpm branch:check feat/my-change`
 - Commit convention check (local): `pnpm commitlint`
 - Full quality gate (local): `pnpm quality:gate`

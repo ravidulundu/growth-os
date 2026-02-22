@@ -1,15 +1,17 @@
 import { Queue } from "bullmq";
 import IORedis from "ioredis";
 
-const redisUrl = process.env.REDIS_URL ?? "redis://localhost:56379";
-
 let redisConnection: IORedis | undefined;
 let publishQueue: Queue | undefined;
 let metricsQueue: Queue | undefined;
 
+function getRedisUrl() {
+  return process.env.REDIS_URL ?? "redis://localhost:56379";
+}
+
 function connection() {
   if (!redisConnection) {
-    redisConnection = new IORedis(redisUrl, {
+    redisConnection = new IORedis(getRedisUrl(), {
       maxRetriesPerRequest: null,
       enableReadyCheck: true
     });

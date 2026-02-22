@@ -2,7 +2,8 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  NotFoundException
+  NotFoundException,
+  ServiceUnavailableException
 } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import { getPool } from "../../shared/db/pool";
@@ -33,6 +34,7 @@ export class SchedulingService {
     const runAt = params.runAt;
     const dedupeKey = params.dedupeKey ?? defaultDedupeKey(params.contentId, runAt);
     const queueDelay = Math.max(0, runAt.getTime() - Date.now());
+    let publishJobId: string | undefined;
 
     if (safeModeEnabled() && !params.confirmHumanReview) {
       throw new BadRequestException(
@@ -54,8 +56,12 @@ export class SchedulingService {
       throw new NotFoundException("Content not found");
     }
 
+    const client = await this.dbPool().connect();
+
     try {
-      const result = await this.dbPool().query<{ id: string }>(
+      await client.query("BEGIN");
+
+      const result = await client.query<{ id: string }>(
         `
           INSERT INTO publish_jobs (
             workspace_id,
@@ -72,7 +78,9 @@ export class SchedulingService {
         [params.workspaceId, params.accountId, params.contentId, dedupeKey, runAt, runAt]
       );
 
-      await this.dbPool().query(
+      publishJobId = result.rows[0].id;
+
+      await client.query(
         `
           UPDATE contents
           SET status = 'scheduled',
@@ -82,11 +90,10 @@ export class SchedulingService {
         [params.contentId]
       );
 
-      const publishJobId = result.rows[0].id;
-      await this.dbPool().query(
+      await client.query(
         `
           INSERT INTO audit_logs (workspace_id, action, entity_type, entity_id, result, metadata)
-          VALUES ($1, 'scheduling.enqueue', 'publish_job', $2, 'success', $3::jsonb);
+          VALUES ($1, 'scheduling.persisted', 'publish_job', $2, 'success', $3::jsonb);
         `,
         [
           params.workspaceId,
@@ -99,6 +106,29 @@ export class SchedulingService {
         ]
       );
 
+      await client.query("COMMIT");
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // noop
+      }
+
+      const message = String((error as { message?: string }).message ?? "");
+      if (message.includes("uq_publish_jobs_workspace_account_dedupe")) {
+        throw new ConflictException("A publish job already exists for this dedupe key");
+      }
+
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    if (!publishJobId) {
+      throw new ServiceUnavailableException("Publish job creation failed");
+    }
+
+    try {
       await getPublishQueue().add(
         "publish",
         { publishJobId },
@@ -110,20 +140,74 @@ export class SchedulingService {
         }
       );
 
-      return {
-        ok: true,
-        publishJobId,
-        dedupeKey,
-        scheduledFor: runAt.toISOString()
-      };
+      await this.dbPool().query(
+        `
+          INSERT INTO audit_logs (workspace_id, action, entity_type, entity_id, result, metadata)
+          VALUES ($1, 'scheduling.enqueue', 'publish_job', $2, 'success', $3::jsonb);
+        `,
+        [
+          params.workspaceId,
+          publishJobId,
+          JSON.stringify({
+            runAt: runAt.toISOString(),
+            dedupeKey,
+            queueDelayMs: queueDelay
+          })
+        ]
+      );
     } catch (error) {
-      const message = String((error as { message?: string }).message ?? "");
-      if (message.includes("uq_publish_jobs_workspace_account_dedupe")) {
-        throw new ConflictException("A publish job already exists for this dedupe key");
-      }
+      const message = String((error as { message?: string }).message ?? "Queue enqueue failed");
 
-      throw error;
+      await this.dbPool().query(
+        `
+          UPDATE publish_jobs
+          SET state = 'failed_permanent',
+              last_error_code = 'QUEUE_ENQUEUE_FAILED',
+              last_error_message = $2,
+              locked_at = NULL,
+              locked_by = NULL,
+              updated_at = now()
+          WHERE id = $1;
+        `,
+        [publishJobId, message]
+      );
+
+      await this.dbPool().query(
+        `
+          UPDATE contents
+          SET status = 'draft',
+              updated_at = now()
+          WHERE id = $1
+            AND status = 'scheduled';
+        `,
+        [params.contentId]
+      );
+
+      await this.dbPool().query(
+        `
+          INSERT INTO audit_logs (workspace_id, action, entity_type, entity_id, result, metadata)
+          VALUES ($1, 'scheduling.enqueue', 'publish_job', $2, 'failure', $3::jsonb);
+        `,
+        [
+          params.workspaceId,
+          publishJobId,
+          JSON.stringify({
+            runAt: runAt.toISOString(),
+            dedupeKey,
+            reason: message
+          })
+        ]
+      );
+
+      throw new ServiceUnavailableException("Failed to enqueue publish job");
     }
+
+    return {
+      ok: true,
+      publishJobId,
+      dedupeKey,
+      scheduledFor: runAt.toISOString()
+    };
   }
 
   async publishNow(params: {

@@ -1,18 +1,22 @@
-import { createDecipheriv, createHash } from "node:crypto";
+import { createHash } from "node:crypto";
 import { Queue, QueueEvents, Worker } from "bullmq";
 import { config } from "dotenv";
+import { calculateBackoffDelayMs, decryptSecret as decryptSecretWithKey } from "@growth-os/shared";
 import IORedis from "ioredis";
 import { Pool } from "pg";
 
 config();
 
-const redisUrl = process.env.REDIS_URL ?? "redis://localhost:56379";
 const databaseUrl =
   process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:55432/growth_os";
 const publishQueueName = "publish-jobs";
 const metricsQueueName = "metrics-jobs";
 
-const redisConnection = new IORedis(redisUrl, {
+function getRedisUrl() {
+  return process.env.REDIS_URL ?? "redis://localhost:56379";
+}
+
+const redisConnection = new IORedis(getRedisUrl(), {
   maxRetriesPerRequest: null,
   enableReadyCheck: true
 });
@@ -34,36 +38,9 @@ type XPostMetrics = {
   quotes: number;
 };
 
-function resolveEncryptionKey(rawKey: string) {
-  const normalized = rawKey.trim();
-  if (/^[a-f0-9]{64}$/i.test(normalized)) {
-    return Buffer.from(normalized, "hex");
-  }
-
-  const base64Candidate = Buffer.from(normalized, "base64");
-  if (base64Candidate.length === 32) {
-    return base64Candidate;
-  }
-
-  return createHash("sha256").update(normalized).digest();
-}
-
 function decryptSecret(payload: string) {
   const rawKey = process.env.TOKEN_ENCRYPTION_KEY;
-  const key = resolveEncryptionKey(rawKey ?? "local-dev-insecure-key");
-  const [ivPart, cipherPart, tagPart] = payload.split(".");
-  if (!ivPart || !cipherPart || !tagPart) {
-    throw new Error("Invalid encrypted payload format");
-  }
-
-  const iv = Buffer.from(ivPart, "base64url");
-  const ciphertext = Buffer.from(cipherPart, "base64url");
-  const authTag = Buffer.from(tagPart, "base64url");
-
-  const decipher = createDecipheriv("aes-256-gcm", key, iv);
-  decipher.setAuthTag(authTag);
-  const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-  return plaintext.toString("utf8");
+  return decryptSecretWithKey(payload, rawKey ?? "local-dev-insecure-key");
 }
 
 function tokenSuffix(value: string) {
@@ -122,19 +99,10 @@ function classifyPublishError(error: unknown) {
   };
 }
 
-function calculateBackoffDelayMs(attempt: number) {
-  const baseMs = 5_000;
-  const capMs = 15 * 60_000;
-  const jitterMs = 1_000;
-  const exponential = Math.min(baseMs * 2 ** Math.max(0, attempt - 1), capMs);
-  const jitter = Math.floor(Math.random() * (jitterMs + 1));
-  return exponential + jitter;
-}
-
 function normalizeTextForSimilarity(text: string) {
   return text
     .toLowerCase()
-    .replace(/[^a-z0-9\s]/gi, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
     .filter((token) => token.length > 2);
 }
@@ -445,6 +413,13 @@ async function processPublishJob(publishJobId: string) {
     }
   } catch (error) {
     try {
+      await client.query("ROLLBACK");
+    } catch {
+      // noop
+    }
+
+    try {
+      await client.query("BEGIN");
       const classified = classifyPublishError(error);
       const stateResult = await client.query<{ attempt_count: number }>(
         `SELECT attempt_count FROM publish_jobs WHERE id = $1 FOR UPDATE`,
@@ -458,7 +433,7 @@ async function processPublishJob(publishJobId: string) {
 
       const attempt = Number(stateResult.rows[0].attempt_count);
       if (classified.transient && attempt < maxAttempts) {
-        const delayMs = calculateBackoffDelayMs(attempt);
+        const delayMs = calculateBackoffDelayMs({ attempt });
         const nextRunAt = new Date(Date.now() + delayMs);
         await client.query(
           `
@@ -528,6 +503,7 @@ async function processPublishJob(publishJobId: string) {
       } catch {
         // noop
       }
+      throw error;
     }
   } finally {
     client.release();
@@ -613,11 +589,11 @@ metricsEvents.on("completed", ({ jobId }) => {
 });
 
 publishWorker.on("ready", () => {
-  console.log(`[worker] publish worker ready on '${publishQueueName}' using ${redisUrl}`);
+  console.log(`[worker] publish worker ready on '${publishQueueName}' using ${getRedisUrl()}`);
 });
 
 metricsWorker.on("ready", () => {
-  console.log(`[worker] metrics worker ready on '${metricsQueueName}' using ${redisUrl}`);
+  console.log(`[worker] metrics worker ready on '${metricsQueueName}' using ${getRedisUrl()}`);
 });
 
 publishWorker.on("error", (error) => {

@@ -184,7 +184,7 @@ CREATE TABLE IF NOT EXISTS post_metric_snapshots (
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   published_post_id UUID NOT NULL REFERENCES published_posts(id) ON DELETE CASCADE,
   x_post_id TEXT NOT NULL,
-  window_key TEXT NOT NULL CHECK (window_key IN ('t15', 't60', 't180', 'manual')),
+  window_key TEXT NOT NULL CHECK (window_key IN ('t15', 't60', 't24', 'manual')),
   impressions INT NOT NULL DEFAULT 0,
   likes INT NOT NULL DEFAULT 0,
   replies INT NOT NULL DEFAULT 0,

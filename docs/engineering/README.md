@@ -8,6 +8,7 @@ Bu klasör Faz 4 kapsamında ürünleşme ve ekip ölçeklenmesi için zorunlu m
 - `docs/engineering/branching-and-commits.md`
 - `docs/engineering/pr-checklist-and-test-policy.md`
 - `docs/engineering/versioning-and-release-notes.md`
+- `docs/engineering/test-strategy-and-quality-gates.md`
 
 ## Enforcement
 

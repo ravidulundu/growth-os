@@ -24,7 +24,7 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Branch Name Check
         env:
@@ -81,7 +81,10 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Migrate DB
+        run: pnpm db:migrate
 
       - name: Quality Gate
         run: pnpm quality:gate

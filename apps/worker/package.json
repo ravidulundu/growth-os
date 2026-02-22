@@ -2,7 +2,7 @@
   "name": "@growth-os/worker",
   "private": true,
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only src/main.ts",
+    "dev": "pnpm --filter @growth-os/shared build && ts-node-dev --respawn --transpile-only src/main.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
@@ -11,6 +11,7 @@
   "dependencies": {
     "bullmq": "5.34.4",
     "dotenv": "16.4.7",
+    "@growth-os/shared": "workspace:*",
     "ioredis": "5.4.2",
     "pg": "8.13.1"
   },
