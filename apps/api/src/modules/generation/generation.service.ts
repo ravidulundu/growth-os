@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { HttpException, HttpStatus, Injectable, NotFoundException } from "@nestjs/common";
 import { getPool } from "../../shared/db/pool";
 import { BillingService } from "../billing/billing.service";
 import type { StyleProfile } from "../style/style.service";
@@ -24,7 +24,7 @@ type PromptTemplateRow = {
 };
 
 const CTA_PATTERN = /\b(join|try|read|check|follow|share|start|learn)\b/gi;
-const ABSOLUTE_CLAIM_PATTERN = /\b(kesin|garanti|asla|mutlaka|100%)\b/gi;
+const ABSOLUTE_CLAIM_PATTERN = /\b(?:kesin|garanti|asla|mutlaka)\b|100%/gi;
 
 function contentPrefix(type: ContentType) {
   if (type === "thread") {
@@ -408,6 +408,20 @@ export class GenerationService {
     return getPool();
   }
 
+  protected async preflightGenerationLimit(workspaceId: string, requestedUnits = 1) {
+    const metering = await this.billingService.getWorkspaceMetering(workspaceId);
+    if (
+      metering.monthlyGenerationLimit !== null &&
+      metering.remainingUnits !== null &&
+      metering.remainingUnits < requestedUnits
+    ) {
+      throw new HttpException(
+        `Monthly generation limit reached for plan '${metering.planKey}'.`,
+        HttpStatus.TOO_MANY_REQUESTS
+      );
+    }
+  }
+
   protected async findPromptTemplate(
     workspaceId: string,
     type: ContentType,
@@ -566,6 +580,8 @@ export class GenerationService {
     promptInput?: string;
     templateName?: string;
   }) {
+    await this.preflightGenerationLimit(params.workspaceId, 1);
+
     const [styleResult, template] = await Promise.all([
       this.dbPool().query<{ style_profile: StyleProfile }>(
         `

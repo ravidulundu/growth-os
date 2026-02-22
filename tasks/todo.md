@@ -197,6 +197,29 @@
   - `pnpm --filter @growth-os/api typecheck` pass
   - `pnpm --filter @growth-os/worker typecheck` pass
   - `pnpm --filter @growth-os/shared typecheck` pass
+- Ek review fixleri (açık thread seti):
+  - `apps/api/src/modules/generation/generation.service.ts`
+    - LLM çağrısı öncesi non-locking metering precheck eklendi (`preflightGenerationLimit`).
+    - Mutlak iddia regex’i `100%` senaryosunu kapsayacak şekilde düzeltildi.
+  - `apps/api/src/modules/generation/tests/generation.createDraft.limitPrecheck.integration.test.ts`
+    - Limit doluyken OpenRouter `fetch` çağrısının hiç tetiklenmediğini doğrulayan regresyon testi eklendi.
+  - `apps/api/src/modules/analytics/analytics.service.ts`
+    - `critical` seviyede bile `low_engagement_rate` reason bilgisinin korunması sağlandı.
+  - `apps/api/src/modules/analytics/tests/analytics.getSnapshots.integration.test.ts`
+    - Degrade senaryosunda hem `critical_impressions` hem `low_engagement_rate` assertion’ı eklendi.
+  - `apps/worker/src/main.ts`
+    - `PUBLISH_MAX_ATTEMPTS` parse işlemi `envInt` helper’ına taşındı (`NaN` fallback güvenliği).
+  - `apps/api/src/modules/auth/auth.controller.ts` + `apps/web/lib/api.ts`
+    - Verify akışında HTML redirect fallback’i navigation sinyaliyle sınırlandı.
+    - Web verify isteğine `Accept: application/json` eklendi.
+  - `apps/api/tests/auth/auth.requestAcceptsHtml.behavior.unit.test.ts`
+    - Navigation vs programmatic fetch ayrımı için unit test eklendi.
+- Bu tur doğrulama:
+  - `pnpm lint` pass
+  - `pnpm --filter @growth-os/api test:unit` pass
+  - `pnpm --filter @growth-os/api test:integration` pass
+  - `pnpm --filter @growth-os/worker test` pass
+  - `pnpm typecheck` pass
 
 ## Next Plan (Security Audit Remediation: Nest/Fastify/Nodemailer Upgrade)
 

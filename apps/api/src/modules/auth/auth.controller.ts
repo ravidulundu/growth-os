@@ -142,9 +142,25 @@ export function resolveSafeRedirectTarget(rawTarget?: string) {
   return allowedOrigins.has(parsed.origin) ? parsed.toString() : null;
 }
 
-function requestAcceptsHtml(request: FastifyRequest) {
-  const accept = request.headers.accept;
-  return typeof accept === "string" && accept.includes("text/html");
+function headerAsString(value: string | string[] | undefined) {
+  if (typeof value === "string") {
+    return value.toLowerCase();
+  }
+  if (Array.isArray(value)) {
+    return value.join(",").toLowerCase();
+  }
+  return "";
+}
+
+export function requestAcceptsHtml(request: FastifyRequest) {
+  const accept = headerAsString(request.headers.accept);
+  if (!accept.includes("text/html")) {
+    return false;
+  }
+
+  const fetchMode = headerAsString(request.headers["sec-fetch-mode"]);
+  const fetchDest = headerAsString(request.headers["sec-fetch-dest"]);
+  return fetchMode === "navigate" || fetchDest === "document" || fetchDest === "iframe";
 }
 
 export function mapBetterAuthError(error: unknown): HttpException {

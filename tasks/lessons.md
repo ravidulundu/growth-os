@@ -17,3 +17,6 @@
 - `--no-verify` sadece acil ve açık kullanıcı onayıyla kullanılmalı; standart akışta quality gate’i gerçekten geçirip push yapmak zorunlu.
 - CI fail analizi yaparken local unstaged dosyaların etkisi ile remote commit durumunu karıştırma; PR check loguna göre kök nedeni net ayır.
 - Next.js tarafında `apps/web/next-env.d.ts` otomatik değiştiğinde repo politikası gereği commit/push kapsamına dahil et; dangling local değişiklik bırakma.
+- Review thread kapanışı istenirken sadece kodu düzeltmek yetmez; aynı turda her thread için birebir reply + resolve yapıp `pr:review-check` çıktısını sıfırlamadan işi bitmiş sayma.
+- Programmatic auth verify endpointlerinde `Accept` header tek başına güvenilir sinyal değildir; fetch vs navigation ayrımı için `Sec-Fetch-*` başlıklarını birlikte kontrol et.
+- Maliyetli dış API çağrısı olan akışlarda (LLM vb.) limit/uygunluk precheck’i çağrıdan önce koy; nihai limit kontrolünü transaction içinde ikinci kez koruyarak race riskini yönet.

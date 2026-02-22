@@ -142,7 +142,8 @@ test("analytics.getSnapshots.integration", async (t) => {
 
   const degraded = await service.getFirstHourAlertForContent(workspaceId, contentId);
   assert.equal(degraded.level, "critical");
-  assert.ok(degraded.reasons.length > 0);
+  assert.ok(degraded.reasons.includes("critical_impressions"));
+  assert.ok(degraded.reasons.includes("low_engagement_rate"));
 
   await assert.rejects(
     () => service.getSnapshotsForPublishedPost(workspaceId, "00000000-0000-4000-8000-000000000000"),

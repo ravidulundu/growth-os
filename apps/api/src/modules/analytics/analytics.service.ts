@@ -144,8 +144,10 @@ export class AnalyticsService {
     if (engagementRate < criticalEngagementRate) {
       level = "critical";
       reasons.push("critical_engagement_rate");
-    } else if (engagementRate < minEngagementRate && level !== "critical") {
-      level = "watch";
+    } else if (engagementRate < minEngagementRate) {
+      if (level !== "critical") {
+        level = "watch";
+      }
       reasons.push("low_engagement_rate");
     }
 

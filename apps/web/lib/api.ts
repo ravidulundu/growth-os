@@ -265,7 +265,10 @@ export async function verifyMagicLink(
   }
 
   return requestJson<MagicLinkVerifyResponse>(`/auth/magic-link/verify?${params.toString()}`, {
-    method: "GET"
+    method: "GET",
+    headers: {
+      accept: "application/json"
+    }
   });
 }
 

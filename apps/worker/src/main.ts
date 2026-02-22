@@ -251,7 +251,7 @@ async function storeMetricsSnapshot(params: {
 
 async function processPublishJob(publishJobId: string) {
   const client = await dbPool.connect();
-  const maxAttempts = Number(process.env.PUBLISH_MAX_ATTEMPTS ?? 8);
+  const maxAttempts = envInt("PUBLISH_MAX_ATTEMPTS", 8);
   let postCommitMetricsPayload:
     | {
         workspaceId: string;
