@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Param, Post } from "@nestjs/common";
 import { z } from "zod";
 import { GenerationService } from "./generation.service";
 
@@ -21,17 +21,25 @@ export class GenerationController {
 
   @Post("draft")
   async createDraft(@Body() body: unknown) {
-    const parsed = draftSchema.parse(body);
-    return this.generationService.createDraft(parsed);
+    const parsed = draftSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+
+    return this.generationService.createDraft(parsed.data);
   }
 
   @Post("content/:contentId/version")
   async createVersion(@Param("contentId") contentId: string, @Body() body: unknown) {
-    const parsed = versionSchema.parse(body);
+    const parsed = versionSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+
     return this.generationService.createVersion({
-      workspaceId: parsed.workspaceId,
+      workspaceId: parsed.data.workspaceId,
       contentId,
-      textBody: parsed.textBody
+      textBody: parsed.data.textBody
     });
   }
 

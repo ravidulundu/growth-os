@@ -47,6 +47,10 @@ test("authCookieSecure respects explicit and fallback behavior", () => {
     assert.equal(authCookieSecure(), true);
   });
 
+  withEnv({ NODE_ENV: "staging", AUTH_COOKIE_SECURE: undefined }, () => {
+    assert.equal(authCookieSecure(), true);
+  });
+
   withEnv({ NODE_ENV: "development", AUTH_COOKIE_SECURE: "" }, () => {
     assert.equal(authCookieSecure(), false);
   });

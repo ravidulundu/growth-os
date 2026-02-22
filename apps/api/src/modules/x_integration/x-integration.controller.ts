@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Param, Post } from "@nestjs/common";
 import { z } from "zod";
 import { XIntegrationService } from "./x-integration.service";
 
@@ -22,20 +22,36 @@ export class XIntegrationController {
 
   @Post("connect/start")
   async startConnect(@Body() body: unknown) {
-    const parsed = workspacePayloadSchema.parse(body);
-    return this.xService.startConnect(parsed.workspaceId);
+    const parsed = workspacePayloadSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+
+    return this.xService.startConnect(parsed.data.workspaceId);
   }
 
   @Post("connect/callback")
   async completeConnect(@Body() body: unknown) {
-    const parsed = connectCallbackSchema.parse(body);
-    return this.xService.completeConnect(parsed);
+    const parsed = connectCallbackSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+
+    return this.xService.completeConnect(parsed.data);
   }
 
   @Post("timeline/ingest")
   async ingestTimeline(@Body() body: unknown) {
-    const parsed = ingestTimelineSchema.parse(body);
-    return this.xService.ingestTimeline(parsed.workspaceId, parsed.accountId, parsed.limit ?? 10);
+    const parsed = ingestTimelineSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+
+    return this.xService.ingestTimeline(
+      parsed.data.workspaceId,
+      parsed.data.accountId,
+      parsed.data.limit ?? 10
+    );
   }
 
   @Get("accounts/:workspaceId")

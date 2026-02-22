@@ -16,13 +16,18 @@ function extractBearerToken(headerValue: string | string[] | undefined) {
     return null;
   }
 
-  const match = header.match(/^Bearer\s+(.+)$/i);
-  if (!match) {
+  const separatorIndex = header.indexOf(" ");
+  if (separatorIndex <= 0) {
     return null;
   }
 
-  const token = match[1].trim();
-  if (!token) {
+  const scheme = header.slice(0, separatorIndex).toLowerCase();
+  if (scheme !== "bearer") {
+    return null;
+  }
+
+  const token = header.slice(separatorIndex + 1).trim();
+  if (!token || token.includes(" ")) {
     return null;
   }
 

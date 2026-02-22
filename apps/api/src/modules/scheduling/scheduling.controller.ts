@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Param, Post } from "@nestjs/common";
 import { z } from "zod";
 import { SchedulingService } from "./scheduling.service";
 
@@ -20,21 +20,29 @@ export class SchedulingController {
 
   @Post("schedule")
   async schedule(@Body() body: unknown) {
-    const parsed = scheduleSchema.parse(body);
+    const parsed = scheduleSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+
     return this.schedulingService.schedule({
-      workspaceId: parsed.workspaceId,
-      accountId: parsed.accountId,
-      contentId: parsed.contentId,
-      dedupeKey: parsed.dedupeKey,
-      confirmHumanReview: parsed.confirmHumanReview,
-      runAt: new Date(parsed.runAt)
+      workspaceId: parsed.data.workspaceId,
+      accountId: parsed.data.accountId,
+      contentId: parsed.data.contentId,
+      dedupeKey: parsed.data.dedupeKey,
+      confirmHumanReview: parsed.data.confirmHumanReview,
+      runAt: new Date(parsed.data.runAt)
     });
   }
 
   @Post("publish-now")
   async publishNow(@Body() body: unknown) {
-    const parsed = baseScheduleSchema.parse(body);
-    return this.schedulingService.publishNow(parsed);
+    const parsed = baseScheduleSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+
+    return this.schedulingService.publishNow(parsed.data);
   }
 
   @Get("jobs/:workspaceId")

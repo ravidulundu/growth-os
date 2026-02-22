@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
 import { z } from "zod";
 import { StyleService } from "./style.service";
 
@@ -14,11 +14,15 @@ export class StyleController {
 
   @Post("extract")
   async extract(@Body() body: unknown) {
-    const parsed = extractPayloadSchema.parse(body);
+    const parsed = extractPayloadSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+
     return this.styleService.extractAndPersist(
-      parsed.workspaceId,
-      parsed.accountId,
-      parsed.sourceLimit ?? 30
+      parsed.data.workspaceId,
+      parsed.data.accountId,
+      parsed.data.sourceLimit ?? 30
     );
   }
 

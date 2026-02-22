@@ -9,7 +9,6 @@ import {
   nextSchedulerState,
   type SchedulerState
 } from "@growth-os/shared";
-import IORedis from "ioredis";
 import { Pool } from "pg";
 
 config();
@@ -52,14 +51,37 @@ function assertSupportedXClientMode() {
 
 assertSupportedXClientMode();
 
-const redisConnection = new IORedis(getRedisUrl(), {
-  maxRetriesPerRequest: null,
-  enableReadyCheck: true
-});
+function redisConnectionOptions() {
+  const rawUrl = getRedisUrl();
+  const parsed = new URL(rawUrl);
+  const parsedDb = parsed.pathname.replace("/", "").trim();
+  const explicitPort = Number(parsed.port);
+  const port = Number.isFinite(explicitPort) && explicitPort > 0 ? explicitPort : 6379;
+  const db = parsedDb ? Number(parsedDb) : 0;
+
+  const options = {
+    host: parsed.hostname,
+    port,
+    username: parsed.username ? decodeURIComponent(parsed.username) : undefined,
+    password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
+    db: Number.isFinite(db) && db >= 0 ? db : 0,
+    maxRetriesPerRequest: null as null,
+    enableReadyCheck: true
+  };
+
+  if (parsed.protocol === "rediss:") {
+    return {
+      ...options,
+      tls: {}
+    };
+  }
+
+  return options;
+}
 
 const dbPool = new Pool({ connectionString: databaseUrl });
-const publishQueue = new Queue(publishQueueName, { connection: redisConnection });
-const metricsQueue = new Queue(metricsQueueName, { connection: redisConnection });
+const publishQueue = new Queue(publishQueueName, { connection: redisConnectionOptions() });
+const metricsQueue = new Queue(metricsQueueName, { connection: redisConnectionOptions() });
 
 type XPublishResult = {
   externalPostId: string;
@@ -711,6 +733,7 @@ async function processPublishJob(publishJobId: string) {
       } catch {
         // noop
       }
+      // Preserve the original publish error as BullMQ failure reason.
       throw error;
     } finally {
       recoveryClient.release();
@@ -827,7 +850,7 @@ const publishWorker = new Worker(
     await processPublishJob(String(job.data.publishJobId));
     return { ok: true };
   },
-  { connection: redisConnection }
+  { connection: redisConnectionOptions() }
 );
 
 const metricsWorker = new Worker(
@@ -836,11 +859,15 @@ const metricsWorker = new Worker(
     await processMetricsJob(job.data as { publishedPostId: string; windowKey: "t60" | "t24" });
     return { ok: true };
   },
-  { connection: redisConnection }
+  { connection: redisConnectionOptions() }
 );
 
-const publishEvents = new QueueEvents(publishQueueName, { connection: redisConnection });
-const metricsEvents = new QueueEvents(metricsQueueName, { connection: redisConnection });
+const publishEvents = new QueueEvents(publishQueueName, {
+  connection: redisConnectionOptions()
+});
+const metricsEvents = new QueueEvents(metricsQueueName, {
+  connection: redisConnectionOptions()
+});
 
 publishEvents.on("completed", ({ jobId }) => {
   logger.info("publish job completed", { jobId });
@@ -892,7 +919,6 @@ const shutdown = async (signal: string) => {
     await metricsEvents.close();
     await publishQueue.close();
     await metricsQueue.close();
-    await redisConnection.quit();
     await dbPool.end();
     process.exit(0);
   } catch (error) {

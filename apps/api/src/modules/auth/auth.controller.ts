@@ -17,7 +17,9 @@ export function authCookieSecure() {
   if (explicit) {
     return explicit.toLowerCase() !== "false";
   }
-  return process.env.NODE_ENV === "production";
+
+  const nodeEnv = process.env.NODE_ENV?.trim().toLowerCase();
+  return nodeEnv === "production" || nodeEnv === "staging";
 }
 
 @Controller("auth")
