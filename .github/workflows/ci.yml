@@ -125,6 +125,7 @@ jobs:
       REDIS_URL: redis://localhost:56379
       NODE_ENV: test
       TOKEN_ENCRYPTION_KEY: ci-dev-key
+      BETTER_AUTH_SECRET: ci-better-auth-secret-please-change
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -140,6 +141,30 @@ jobs:
         run: pnpm db:migrate
       - name: Integration Tests
         run: pnpm test:integration
+      - name: Auth Endpoint Contract Smoke (legacy off + Better Auth on)
+        env:
+          SMOKE_BASE_URL: http://localhost:4000
+          APP_URL: http://localhost:3010
+          API_URL: http://localhost:4000
+          BETTER_AUTH_BASE_URL: http://localhost:4000
+          AUTH_DEV_LOG_MAGIC_LINK_URL: "false"
+        run: |
+          set -euo pipefail
+          pnpm --filter @growth-os/api dev >/tmp/growth-os-api-smoke.log 2>&1 &
+          api_pid=$!
+          cleanup() {
+            kill "${api_pid}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 30); do
+            if curl -fsS "http://localhost:4000/health" >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          pnpm smoke:test
 
   build:
     runs-on: ubuntu-latest

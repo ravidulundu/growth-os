@@ -1,40 +1,42 @@
-import Link from "next/link";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { StudioApp } from "../components/studio-app";
 
-async function fetchHealth() {
-  const apiUrl = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+function resolveApiBaseUrl() {
+  const configured = process.env.API_URL?.trim() || process.env.NEXT_PUBLIC_API_URL?.trim();
+  if (configured) {
+    return configured.replace(/\/+$/, "");
+  }
+
+  return "http://localhost:4000";
+}
+
+async function hasValidSession() {
+  const cookieStore = await cookies();
+  const cookieHeader = cookieStore.toString();
+  if (!cookieHeader) {
+    return false;
+  }
+
   try {
-    const res = await fetch(`${apiUrl}/health`, { cache: "no-store" });
-    if (!res.ok) {
-      return { ok: false, status: res.status };
-    }
-    return await res.json();
+    const response = await fetch(`${resolveApiBaseUrl()}/auth/session`, {
+      method: "GET",
+      cache: "no-store",
+      headers: {
+        cookie: cookieHeader
+      }
+    });
+    return response.ok;
   } catch {
-    return { ok: false, status: "unreachable" };
+    return false;
   }
 }
 
 export default async function HomePage() {
-  const health = await fetchHealth();
+  const sessionValid = await hasValidSession();
+  if (!sessionValid) {
+    redirect("/login");
+  }
 
-  return (
-    <main className="mx-auto max-w-3xl p-8">
-      <h1 className="text-3xl font-semibold">Growth OS - Setup Complete</h1>
-      <p className="mt-3 text-sm text-slate-600">
-        Monorepo skeleton is running with web + API + DB migration infrastructure.
-      </p>
-
-      <section className="mt-8 rounded-lg border border-slate-200 bg-white p-4">
-        <h2 className="text-lg font-medium">API Healthcheck</h2>
-        <pre className="mt-3 overflow-x-auto rounded bg-slate-50 p-3 text-xs">
-          {JSON.stringify(health, null, 2)}
-        </pre>
-      </section>
-
-      <section className="mt-6">
-        <Link className="text-sm text-blue-700 underline" href="/login">
-          Go to Magic Link Stub
-        </Link>
-      </section>
-    </main>
-  );
+  return <StudioApp />;
 }

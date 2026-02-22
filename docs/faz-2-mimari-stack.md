@@ -40,7 +40,7 @@
 
 - Seçenek A (önerilen): TypeScript + NestJS (Fastify adapter)
 - Seçenek B: Python + FastAPI
-- AI katmanı: OpenAI SDK, orchestration adapter ile soyutlanmış
+- AI katmanı: OpenRouter (OpenAI-compatible API), orchestration adapter ile soyutlanmış
 - Not: Tek kişilik hız için TS fullstack (Next + Nest) bağlam maliyetini düşürür
 
 ### Database

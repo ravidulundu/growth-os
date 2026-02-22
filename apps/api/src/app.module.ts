@@ -3,7 +3,7 @@ import { APP_GUARD } from "@nestjs/core";
 import { AnalyticsController } from "./modules/analytics/analytics.controller";
 import { AnalyticsService } from "./modules/analytics/analytics.service";
 import { AuthController } from "./modules/auth/auth.controller";
-import { AuthService } from "./modules/auth/auth.service";
+import { AuthSessionController } from "./modules/auth/auth-session.controller";
 import { GenerationController } from "./modules/generation/generation.controller";
 import { GenerationService } from "./modules/generation/generation.service";
 import { SchedulingController } from "./modules/scheduling/scheduling.controller";
@@ -20,6 +20,7 @@ import { HealthController } from "./shared/health/health.controller";
   controllers: [
     HealthController,
     AuthController,
+    AuthSessionController,
     XIntegrationController,
     StyleController,
     GenerationController,
@@ -31,7 +32,6 @@ import { HealthController } from "./shared/health/health.controller";
       provide: APP_GUARD,
       useClass: SessionAuthGuard
     },
-    AuthService,
     XIntegrationService,
     StyleService,
     GenerationService,

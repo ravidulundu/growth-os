@@ -3,7 +3,7 @@
 ## Amaç ve Kapsam
 
 - Repo iskeletini, local dev ortamını ve ilk çalıştırmayı standardize etmek
-- Çalışır iskelet: hello world + DB migrate + basic auth (magic link stub)
+- Çalışır iskelet: hello world + DB migrate + basic auth (Better Auth magic link)
 - DX standardı: lint/format/pre-commit ve net script isimleri
 
 ## Teslimatlar
@@ -41,8 +41,8 @@
 ### İlk endpointler
 
 - `GET /health`
-- `POST /auth/magic-link/request`
-- `POST /auth/magic-link/verify`
+- `POST /auth/sign-in/magic-link`
+- `GET /auth/magic-link/verify`
 
 ### Migration + seed
 
@@ -73,8 +73,8 @@ Başarılı çalıştırılan komutlar:
 HTTP doğrulama:
 
 - `GET /health` -> `{"status":"ok"...}`
-- `POST /auth/magic-link/request` -> generic ACK (`ok:true`, token/link yok)
-- `POST /auth/magic-link/verify` -> `ok:true` + `sessionToken`
+- `POST /auth/sign-in/magic-link` -> generic ACK (`ok:true`, token/link yok)
+- `GET /auth/magic-link/verify?token=...&callbackURL=...` -> `HttpOnly session_token` set + callback URL'e redirect
 
 ## Not
 

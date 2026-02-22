@@ -13,13 +13,14 @@
 
 ## Kapsam Matrisi
 
-| Alan               | Unit                                    | Integration                                  | E2E                    |
-| ------------------ | --------------------------------------- | -------------------------------------------- | ---------------------- |
-| OAuth2 PKCE        | state/verifier helper doğrulama         | callback/state doğrulama + token persistence | connect adımı          |
-| Generation         | prompt composer + constraints birleşimi | draft/version persistence                    | generate/edit adımı    |
-| Scheduling/Publish | state machine + backoff/rate-limit      | enqueue -> publish job state geçişi          | schedule/publish adımı |
-| Analytics          | snapshot mapping/window logic           | metric snapshot persistence                  | analytics görünürlüğü  |
-| Safety/Compliance  | similarity threshold + safe-mode guard  | publish öncesi policy/guard davranışı        | staging dry-run akışı  |
+| Alan               | Unit                                    | Integration                                    | E2E                    |
+| ------------------ | --------------------------------------- | ---------------------------------------------- | ---------------------- |
+| Auth (Better Auth) | response shape + cookie policy          | legacy endpoint disabled + sign-in endpoint ok | email-link login akışı |
+| OAuth2 PKCE        | state/verifier helper doğrulama         | callback/state doğrulama + token persistence   | connect adımı          |
+| Generation         | prompt composer + constraints birleşimi | draft/version persistence                      | generate/edit adımı    |
+| Scheduling/Publish | state machine + backoff/rate-limit      | enqueue -> publish job state geçişi            | schedule/publish adımı |
+| Analytics          | snapshot mapping/window logic           | metric snapshot persistence                    | analytics görünürlüğü  |
+| Safety/Compliance  | similarity threshold + safe-mode guard  | publish öncesi policy/guard davranışı          | staging dry-run akışı  |
 
 ## Test Naming Standardı
 

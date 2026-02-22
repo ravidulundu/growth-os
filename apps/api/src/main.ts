@@ -5,6 +5,13 @@ import { FastifyAdapter, NestFastifyApplication } from "@nestjs/platform-fastify
 import cors from "@fastify/cors";
 import { loadEnv } from "./shared/db/env";
 
+const LOCAL_DEV_ORIGINS = [
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "http://localhost:3010",
+  "http://127.0.0.1:3010"
+];
+
 function allowedCorsOrigins() {
   const configured = process.env.CORS_ALLOWED_ORIGINS?.trim();
   if (configured) {
@@ -16,10 +23,20 @@ function allowedCorsOrigins() {
 
   const appUrl = process.env.APP_URL;
   if (appUrl) {
+    try {
+      const parsed = new URL(appUrl);
+      const isLocalhost = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+      if (isLocalhost) {
+        return Array.from(new Set([appUrl, ...LOCAL_DEV_ORIGINS]));
+      }
+    } catch {
+      return [appUrl];
+    }
+
     return [appUrl];
   }
 
-  return ["http://localhost:3000", "http://127.0.0.1:3000"];
+  return LOCAL_DEV_ORIGINS;
 }
 
 async function bootstrap() {

@@ -47,7 +47,7 @@ Not: `3000` doluysa `WEB_PORT=3010 pnpm dev` ile web portunu override edebilirsi
 - `pnpm quality:gate`: lint + typecheck + unit + integration + coverage + build
 - `pnpm deploy:staging`: staging deploy hook tetikler
 - `pnpm deploy:prod`: prod deploy hook tetikler
-- `pnpm smoke:test`: healthcheck + basic auth flow smoke testi
+- `pnpm smoke:test`: healthcheck + auth endpoint kontrat smoke testi (legacy kapali + Better Auth acik)
 
 ## MVP-0 API Akışı (Local)
 

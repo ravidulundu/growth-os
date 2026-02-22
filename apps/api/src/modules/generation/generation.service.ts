@@ -8,6 +8,146 @@ function contentPrefix(type: ContentType) {
   return type === "thread" ? "Thread taslağı" : "Tweet taslağı";
 }
 
+function normalizeEnvValue(value: string | undefined) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function llmProvider() {
+  const explicitProvider = normalizeEnvValue(process.env.LLM_PROVIDER);
+  if (explicitProvider === "openrouter") {
+    return "openrouter" as const;
+  }
+  if (explicitProvider === "stub") {
+    return "stub" as const;
+  }
+  return normalizeEnvValue(process.env.OPENROUTER_API_KEY)
+    ? ("openrouter" as const)
+    : ("stub" as const);
+}
+
+function openRouterModel() {
+  return (
+    normalizeEnvValue(process.env.OPENROUTER_MODEL) ??
+    normalizeEnvValue(process.env.OPENAI_MODEL) ??
+    "openai/gpt-4o-mini"
+  );
+}
+
+function openRouterBaseUrl() {
+  return normalizeEnvValue(process.env.OPENROUTER_BASE_URL) ?? "https://openrouter.ai/api/v1";
+}
+
+function styleInstruction(style: StyleProfile | undefined) {
+  if (!style) {
+    return "Ton dengeli ve net olsun; kısa ve anlaşılır cümleler kullan.";
+  }
+  return [
+    `Ton: ${style.preferredTone}.`,
+    `Ortalama uzunluk hedefi: ${style.avgLength}.`,
+    `Hashtag oranı: ${style.hashtagRatio}.`,
+    `Emoji oranı: ${style.emojiRatio}.`,
+    `CTA oranı: ${style.ctaRatio}.`
+  ].join(" ");
+}
+
+function buildOpenRouterPrompt(input: {
+  topic: string;
+  type: ContentType;
+  promptInput?: string;
+  style?: StyleProfile;
+}) {
+  const extraPrompt = input.promptInput?.trim();
+  const typeInstruction =
+    input.type === "thread"
+      ? "4 maddelik numaralı bir thread yaz. Her satırı `1/`, `2/` şeklinde başlat."
+      : "Tek paragraflık, yayınlanabilir bir tweet yaz.";
+
+  return [
+    "Türkçe içerik üret.",
+    typeInstruction,
+    styleInstruction(input.style),
+    `Konu: ${input.topic}.`,
+    extraPrompt ? `Ek talimat: ${extraPrompt}.` : "Ek talimat yok.",
+    "Gereksiz abartı, emoji spam ve yanıltıcı vaat kullanma."
+  ].join(" ");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function extractOpenRouterContent(payload: unknown) {
+  if (!isRecord(payload)) {
+    return undefined;
+  }
+  const choices = payload.choices;
+  if (!Array.isArray(choices) || choices.length === 0) {
+    return undefined;
+  }
+  const firstChoice = choices[0];
+  if (!isRecord(firstChoice)) {
+    return undefined;
+  }
+  const message = firstChoice.message;
+  if (!isRecord(message)) {
+    return undefined;
+  }
+  const content = message.content;
+  return typeof content === "string" ? content.trim() : undefined;
+}
+
+async function requestOpenRouterCompletion(input: {
+  topic: string;
+  type: ContentType;
+  promptInput?: string;
+  style?: StyleProfile;
+}) {
+  const apiKey = normalizeEnvValue(process.env.OPENROUTER_API_KEY);
+  if (!apiKey) {
+    return undefined;
+  }
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${apiKey}`,
+    "Content-Type": "application/json"
+  };
+  const appUrl = normalizeEnvValue(process.env.APP_URL);
+  if (appUrl) {
+    headers["HTTP-Referer"] = appUrl;
+  }
+
+  const title = normalizeEnvValue(process.env.OPENROUTER_APP_NAME) ?? "growth-os";
+  headers["X-Title"] = title;
+
+  const response = await fetch(`${openRouterBaseUrl()}/chat/completions`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model: openRouterModel(),
+      temperature: 0.6,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a social media writing assistant. Return only the final publish-ready text with no extra explanation."
+        },
+        {
+          role: "user",
+          content: buildOpenRouterPrompt(input)
+        }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    return undefined;
+  }
+
+  const payload = (await response.json()) as unknown;
+  return extractOpenRouterContent(payload);
+}
+
 export function buildGeneratedText(input: {
   topic: string;
   type: ContentType;
@@ -35,6 +175,21 @@ export class GenerationService {
     return getPool();
   }
 
+  protected async generateDraftText(input: {
+    topic: string;
+    type: ContentType;
+    promptInput?: string;
+    style?: StyleProfile;
+  }) {
+    const fallbackText = buildGeneratedText(input);
+    if (llmProvider() !== "openrouter") {
+      return fallbackText;
+    }
+
+    const generatedText = await requestOpenRouterCompletion(input);
+    return generatedText && generatedText.length > 0 ? generatedText : fallbackText;
+  }
+
   async createDraft(params: {
     workspaceId: string;
     accountId: string;
@@ -52,9 +207,10 @@ export class GenerationService {
       [params.workspaceId, params.accountId]
     );
 
-    const generatedText = buildGeneratedText({
+    const generatedText = await this.generateDraftText({
       topic: params.topic,
       type: params.type,
+      promptInput: params.promptInput,
       style: styleResult.rows[0]?.style_profile
     });
 

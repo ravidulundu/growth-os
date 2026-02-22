@@ -6,7 +6,6 @@ import {
   UnauthorizedException
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import { createHash } from "node:crypto";
 import { getPool } from "../db/pool";
 import { IS_PUBLIC_ROUTE } from "./public.decorator";
 
@@ -147,21 +146,20 @@ export class SessionAuthGuard implements CanActivate {
       throw new UnauthorizedException("Missing or invalid session token");
     }
 
-    const tokenHash = createHash("sha256").update(token).digest("hex");
-    const sessionResult = await getPool().query<{ id: string; user_id: string }>(
+    const pool = getPool();
+    const betterAuthSessionResult = await pool.query<{ id: string; user_id: string }>(
       `
         SELECT id, user_id
-        FROM auth_sessions
-        WHERE token_hash = $1
-          AND revoked_at IS NULL
+        FROM better_auth_sessions
+        WHERE token = $1
           AND expires_at > now()
         ORDER BY created_at DESC
         LIMIT 1;
       `,
-      [tokenHash]
+      [token]
     );
 
-    const session = sessionResult.rows[0];
+    const session = betterAuthSessionResult.rows[0];
     if (!session) {
       throw new UnauthorizedException("Invalid or expired session");
     }
@@ -179,7 +177,6 @@ export class SessionAuthGuard implements CanActivate {
         scopedResourceIds.publishedPostId
     );
 
-    const pool = getPool();
     let derivedWorkspaceId: string | null = null;
     if (scopedResourceIds.contentId) {
       if (!isUuid(scopedResourceIds.contentId)) {
@@ -278,11 +275,11 @@ export class SessionAuthGuard implements CanActivate {
     };
 
     // Best-effort activity update; auth should not fail solely due to this.
-    void getPool()
+    void pool
       .query(
         `
-          UPDATE auth_sessions
-          SET last_used_at = now()
+          UPDATE better_auth_sessions
+          SET updated_at = now()
           WHERE id = $1;
         `,
         [session.id]

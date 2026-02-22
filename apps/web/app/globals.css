@@ -3,20 +3,118 @@
 @tailwind utilities;
 
 :root {
+  --background: #f7f1e3;
+  --foreground: #171a28;
+  --card: rgba(255, 252, 246, 0.88);
+  --card-foreground: #171a28;
+  --muted: rgba(31, 45, 90, 0.08);
+  --muted-foreground: #5a6079;
+  --border: rgba(23, 26, 40, 0.14);
+  --input: rgba(23, 26, 40, 0.18);
+  --ring: #0f7b85;
+  --primary: #c34f2a;
+  --primary-hover: #a53e1f;
+  --primary-foreground: #fff6ef;
+  --secondary: #1f2d5a;
+  --secondary-hover: #152041;
+  --secondary-foreground: #ecf1ff;
+  --radius: 0.75rem;
+  --font-body: "Avenir Next", "Optima", "Segoe UI", "Helvetica Neue", Helvetica, sans-serif;
+  --font-display: "Iowan Old Style", "Baskerville", "Palatino Linotype", serif;
   color-scheme: light;
 }
 
+* {
+  box-sizing: border-box;
+}
+
+html,
 body {
   margin: 0;
-  font-family:
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    Segoe UI,
-    Roboto,
-    Helvetica,
-    Arial,
-    sans-serif;
-  background: #f6f7fb;
-  color: #111827;
+  min-height: 100%;
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--foreground);
+  background: radial-gradient(circle at 10% 8%, rgba(195, 79, 42, 0.18), transparent 38%),
+    radial-gradient(circle at 90% 2%, rgba(15, 123, 133, 0.2), transparent 34%),
+    linear-gradient(180deg, #fcf7eb 0%, #f7f1e3 44%, #eee5d0 100%);
+  text-rendering: optimizeLegibility;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.skip-link {
+  position: fixed;
+  left: 0.75rem;
+  top: 0.75rem;
+  z-index: 1000;
+  border-radius: 0.75rem;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--foreground);
+  padding: 0.5rem 0.75rem;
+  transform: translateY(-220%);
+  transition:
+    transform 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+main {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.motion-rise {
+  animation: rise-in 520ms cubic-bezier(0.22, 0.86, 0.36, 1) both;
+}
+
+::selection {
+  background: rgba(15, 123, 133, 0.22);
+  color: var(--foreground);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  text-wrap: balance;
+}
+
+code,
+pre,
+kbd,
+samp {
+  font-family: "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
 }

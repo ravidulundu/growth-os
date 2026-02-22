@@ -13,6 +13,9 @@
 - If migration exists, rollback note included
 - Observability updated (log + error path)
 - Security impact reviewed (workspace isolation, especially MVP-1)
+- Auth endpoint changes:
+  - Legacy endpoint backward-compatibility kararını belirt (`/auth/magic-link/request`)
+  - Better Auth endpoint kontratını doğrula (`/auth/sign-in/magic-link`)
 
 PR template:
 
@@ -22,6 +25,7 @@ PR template:
 
 1. New module => at least 1 unit test.
 2. X API integration changes => integration test with mock/stub.
+3. Auth flow changes => smoke/contract check güncellemesi zorunlu.
 
 ## CI Quality Gates
 

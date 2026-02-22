@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildMagicLinkRequestResponse } from "../../src/modules/auth/auth.service";
+import { buildMagicLinkRequestResponse } from "../../src/modules/auth/auth-response";
 
 test("auth.requestMagicLink.responseShape.contract", () => {
   const response = buildMagicLinkRequestResponse();

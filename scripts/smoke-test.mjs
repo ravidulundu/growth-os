@@ -30,6 +30,15 @@ async function assertJson(url, init) {
   }
 }
 
+async function requestWithBody(url, init) {
+  const response = await fetch(url, init);
+  const body = await response.text();
+  return {
+    status: response.status,
+    body
+  };
+}
+
 async function main() {
   const baseUrl = requiredEnv("SMOKE_BASE_URL").replace(/\/$/, "");
 
@@ -42,7 +51,21 @@ async function main() {
   }
 
   const email = `smoke+${Date.now()}@example.com`;
-  const magicLink = await assertJson(`${baseUrl}/auth/magic-link/request`, {
+  const legacyEndpoint = await requestWithBody(`${baseUrl}/auth/magic-link/request`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json"
+    },
+    body: JSON.stringify({ email })
+  });
+  if (legacyEndpoint.status !== 404) {
+    throw new Error(
+      `Legacy magic-link endpoint must be disabled (expected 404, got ${legacyEndpoint.status}): ${legacyEndpoint.body}`
+    );
+  }
+
+  const magicLink = await assertJson(`${baseUrl}/auth/sign-in/magic-link`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -55,7 +78,7 @@ async function main() {
     throw new Error(`Magic link request did not return ok=true: ${JSON.stringify(magicLink)}`);
   }
 
-  writeStdout("[smoke] healthcheck + magic-link request passed");
+  writeStdout("[smoke] healthcheck + legacy endpoint disabled + magic-link sign-in request passed");
 }
 
 main().catch((error) => {

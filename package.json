@@ -29,7 +29,6 @@
     "infra:down": "pnpm db:down",
     "db:migrate": "pnpm --filter @growth-os/api db:migrate",
     "db:seed": "pnpm --filter @growth-os/api db:seed",
-    "db:cleanup:magic-links": "pnpm --filter @growth-os/api db:cleanup:magic-links",
     "seed": "pnpm --filter @growth-os/api db:seed",
     "dev:prepare": "pnpm db:up && pnpm db:migrate && pnpm seed",
     "smoke:test": "node scripts/smoke-test.mjs",

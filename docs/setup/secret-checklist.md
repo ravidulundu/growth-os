@@ -8,11 +8,16 @@
 ## Secret Manager'da zorunlu olanlar
 
 - `TOKEN_ENCRYPTION_KEY`
-- `OPENAI_API_KEY`
+- `OPENROUTER_API_KEY`
 - `X_CLIENT_SECRET`
-- `JWT_SECRET`
+- `BETTER_AUTH_SECRET`
 - `DATABASE_URL`
 - `REDIS_URL`
+
+## Auth config (zorunlu, secret olmayabilir)
+
+- `BETTER_AUTH_BASE_URL` (API origin; magic-link URL uretimi icin)
+- `APP_URL` (web app origin; callback/redirect dogrulamasi icin)
 
 ## Local
 
