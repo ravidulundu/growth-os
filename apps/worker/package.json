@@ -1,0 +1,21 @@
+{
+  "name": "@growth-os/worker",
+  "private": true,
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/main.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "test": "node -e \"console.log('No worker tests yet')\""
+  },
+  "dependencies": {
+    "bullmq": "5.34.4",
+    "dotenv": "16.4.7",
+    "ioredis": "5.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.1",
+    "ts-node-dev": "2.0.0",
+    "typescript": "5.7.3"
+  }
+}

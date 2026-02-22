@@ -1,0 +1,32 @@
+{
+  "name": "@growth-os/api",
+  "private": true,
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/main.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "test": "node -e \"console.log('No api tests yet')\"",
+    "db:migrate": "tsx src/shared/db/migrate.ts",
+    "db:seed": "tsx src/shared/db/seed.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "9.0.1",
+    "@nestjs/common": "10.4.15",
+    "@nestjs/core": "10.4.15",
+    "@nestjs/platform-fastify": "10.4.15",
+    "dotenv": "16.4.7",
+    "fastify": "4.28.1",
+    "pg": "8.13.1",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.1",
+    "zod": "3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.1",
+    "@types/pg": "8.11.11",
+    "tsx": "4.19.2",
+    "ts-node-dev": "2.0.0",
+    "typescript": "5.7.3"
+  }
+}
