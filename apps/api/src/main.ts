@@ -40,7 +40,7 @@ async function bootstrap() {
         return;
       }
 
-      callback(new Error(`Origin '${origin}' is not allowed`), false);
+      callback(null, false);
     },
     credentials: true
   });
