@@ -16,3 +16,4 @@
 - PR review fix talebinde yalnız kod düzeltmek yetmez: aynı turda thread reply + resolve adımını da bitirip commit hook bloklarını kaldır.
 - `--no-verify` sadece acil ve açık kullanıcı onayıyla kullanılmalı; standart akışta quality gate’i gerçekten geçirip push yapmak zorunlu.
 - CI fail analizi yaparken local unstaged dosyaların etkisi ile remote commit durumunu karıştırma; PR check loguna göre kök nedeni net ayır.
+- Next.js tarafında `apps/web/next-env.d.ts` otomatik değiştiğinde repo politikası gereği commit/push kapsamına dahil et; dangling local değişiklik bırakma.
