@@ -22,6 +22,7 @@
     "lint-staged": "lint-staged",
     "commitlint": "commitlint",
     "branch:check": "node scripts/check-branch-name.mjs",
+    "pr:review-check": "node scripts/check-pr-review-threads.mjs",
     "prepare": "husky || true",
     "db:up": "docker compose up -d --remove-orphans --wait",
     "db:down": "docker compose down",

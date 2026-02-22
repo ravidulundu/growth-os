@@ -3,4 +3,4 @@ if [ -f "$(dirname -- "$0")/_/husky.sh" ]; then
   . "$(dirname -- "$0")/_/husky.sh"
 fi
 
-pnpm lint-staged
+pnpm pr:review-check && pnpm lint-staged
