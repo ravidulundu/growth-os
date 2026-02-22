@@ -105,6 +105,18 @@ function classifyPublishError(error: unknown) {
   };
 }
 
+function safeModeEnabled() {
+  return (process.env.SAFE_MODE_ENABLED ?? "true").toLowerCase() !== "false";
+}
+
+function similarityGuardEnabled() {
+  const explicit = process.env.SAFE_MODE_SIMILARITY_GUARD_ENABLED;
+  if (explicit !== undefined) {
+    return explicit.toLowerCase() !== "false";
+  }
+  return safeModeEnabled();
+}
+
 async function storeMetricsSnapshot(params: {
   workspaceId: string;
   publishedPostId: string;
@@ -243,29 +255,31 @@ async function processPublishJob(publishJobId: string) {
       });
     }
 
-    const similarityThreshold = Number(process.env.SAFE_MODE_MAX_SIMILARITY ?? 0.85);
-    const recentPublished = await client.query<{ current_text: string }>(
-      `
-        SELECT c.current_text
-        FROM published_posts pp
-        JOIN contents c ON c.id = pp.content_id
-        WHERE pp.account_id = $1
-        ORDER BY pp.published_at DESC
-        LIMIT 20;
-      `,
-      [jobRow.account_id]
-    );
+    if (similarityGuardEnabled()) {
+      const similarityThreshold = Number(process.env.SAFE_MODE_MAX_SIMILARITY ?? 0.85);
+      const recentPublished = await client.query<{ current_text: string }>(
+        `
+          SELECT c.current_text
+          FROM published_posts pp
+          JOIN contents c ON c.id = pp.content_id
+          WHERE pp.account_id = $1
+          ORDER BY pp.published_at DESC
+          LIMIT 20;
+        `,
+        [jobRow.account_id]
+      );
 
-    const highestSimilarity = recentPublished.rows.reduce((max, row) => {
-      const score = cosineSimilarity(contentResult.rows[0].current_text, row.current_text);
-      return score > max ? score : max;
-    }, 0);
+      const highestSimilarity = recentPublished.rows.reduce((max, row) => {
+        const score = cosineSimilarity(contentResult.rows[0].current_text, row.current_text);
+        return score > max ? score : max;
+      }, 0);
 
-    if (highestSimilarity >= similarityThreshold) {
-      throw Object.assign(new Error("Content too similar to recent published posts"), {
-        code: "DUPLICATE_SIMILARITY",
-        transient: false
-      });
+      if (highestSimilarity >= similarityThreshold) {
+        throw Object.assign(new Error("Content too similar to recent published posts"), {
+          code: "DUPLICATE_SIMILARITY",
+          transient: false
+        });
+      }
     }
 
     const existingPublished = await client.query<{ id: string; external_post_id: string }>(
