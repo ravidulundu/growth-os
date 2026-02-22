@@ -76,12 +76,13 @@ export class XIntegrationService {
   }
 
   async completeConnect(params: { workspaceId: string; state: string; code: string }) {
-    const client = await this.dbPool().connect();
+    const stateHash = base64UrlSha256(params.state);
+    const stateClient = await this.dbPool().connect();
+    let codeVerifier: string;
 
     try {
-      await client.query("BEGIN");
-      const stateHash = base64UrlSha256(params.state);
-      const stateResult = await client.query<{
+      await stateClient.query("BEGIN");
+      const stateResult = await stateClient.query<{
         id: string;
         code_verifier_hash: string;
         code_verifier_encrypted: string | null;
@@ -108,20 +109,36 @@ export class XIntegrationService {
         throw new UnauthorizedException("OAuth verifier missing or invalid");
       }
 
-      const codeVerifier = decryptSecret(stateResult.rows[0].code_verifier_encrypted);
+      codeVerifier = decryptSecret(stateResult.rows[0].code_verifier_encrypted);
       if (base64UrlSha256(codeVerifier) !== stateResult.rows[0].code_verifier_hash) {
         throw new UnauthorizedException("OAuth verifier mismatch");
       }
 
-      await client.query("UPDATE x_oauth_states SET consumed_at = now() WHERE id = $1", [
+      await stateClient.query("UPDATE x_oauth_states SET consumed_at = now() WHERE id = $1", [
         stateResult.rows[0].id
       ]);
+      await stateClient.query("COMMIT");
+    } catch (error) {
+      try {
+        await stateClient.query("ROLLBACK");
+      } catch {
+        // noop
+      }
+      throw error;
+    } finally {
+      stateClient.release();
+    }
 
-      const token = await this.xClient().exchangeCodeForToken(params.code, {
-        codeVerifier
-      });
-      const profile = await this.xClient().getProfile(token.accessToken);
+    // External API calls run outside DB transaction/row lock scope.
+    const token = await this.xClient().exchangeCodeForToken(params.code, {
+      codeVerifier
+    });
+    const profile = await this.xClient().getProfile(token.accessToken);
 
+    const client = await this.dbPool().connect();
+
+    try {
+      await client.query("BEGIN");
       const accountResult = await client.query<{ id: string }>(
         `
           INSERT INTO x_accounts (workspace_id, x_user_id, username, is_active)

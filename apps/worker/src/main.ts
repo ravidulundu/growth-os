@@ -54,7 +54,7 @@ assertSupportedXClientMode();
 function redisConnectionOptions() {
   const rawUrl = getRedisUrl();
   const parsed = new URL(rawUrl);
-  const parsedDb = parsed.pathname.replace("/", "").trim();
+  const parsedDb = parsed.pathname.replace(/^\/+/, "").split("/")[0]?.trim();
   const explicitPort = Number(parsed.port);
   const port = Number.isFinite(explicitPort) && explicitPort > 0 ? explicitPort : 6379;
   const db = parsedDb ? Number(parsedDb) : 0;
@@ -294,7 +294,9 @@ async function processPublishJob(publishJobId: string) {
       return;
     }
 
-    const inProgressState = nextSchedulerState(jobRow.state as SchedulerState, "start");
+    const currentState = assertSchedulerState(jobRow.state, "publish job processing");
+    const inProgressState =
+      currentState === "in_progress" ? currentState : nextSchedulerState(currentState, "start");
     const attempt = Number(jobRow.attempt_count) + 1;
     await client.query(
       `
@@ -486,15 +488,33 @@ async function processPublishJob(publishJobId: string) {
     await client.query(
       `
         INSERT INTO usage_events (workspace_id, account_id, event_type, endpoint_key, units, metadata)
-        VALUES ($1, $2, 'x.publish', 'tweet.write', 1, $3::jsonb);
+        SELECT $1, $2, 'x.publish', 'tweet.write', 1, $3::jsonb
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM usage_events
+          WHERE workspace_id = $1
+            AND account_id = $2
+            AND event_type = 'x.publish'
+            AND endpoint_key = 'tweet.write'
+            AND metadata->>'publishJobId' = $4
+        );
       `,
-      [activeWorkspaceId, activeAccountId, JSON.stringify({ publishJobId })]
+      [activeWorkspaceId, activeAccountId, JSON.stringify({ publishJobId }), publishJobId]
     );
 
     await client.query(
       `
         INSERT INTO audit_logs (workspace_id, action, entity_type, entity_id, result)
-        VALUES ($1, 'publish.completed', 'publish_job', $2, 'success');
+        SELECT $1, 'publish.completed', 'publish_job', $2, 'success'
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM audit_logs
+          WHERE workspace_id = $1
+            AND action = 'publish.completed'
+            AND entity_type = 'publish_job'
+            AND entity_id = $2
+            AND result = 'success'
+        );
       `,
       [activeWorkspaceId, publishJobId]
     );
