@@ -5,6 +5,7 @@
     "dev": "pnpm --filter @growth-os/shared build && ts-node-dev --respawn --transpile-only src/main.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
+    "lint": "eslint src tests scripts",
     "typecheck": "tsc --noEmit",
     "test": "pnpm test:unit",
     "test:unit": "pnpm --filter @growth-os/shared build && tsx --test tests/**/*.test.ts",
