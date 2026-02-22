@@ -52,6 +52,31 @@ function extractWorkspaceId(request: {
   );
 }
 
+function extractScopedResourceIds(request: {
+  params?: Record<string, unknown>;
+  body?: Record<string, unknown>;
+  query?: Record<string, unknown>;
+}) {
+  return {
+    contentId:
+      pickStringValue(request.params?.contentId) ??
+      pickStringValue(request.body?.contentId) ??
+      pickStringValue(request.query?.contentId),
+    accountId:
+      pickStringValue(request.params?.accountId) ??
+      pickStringValue(request.body?.accountId) ??
+      pickStringValue(request.query?.accountId),
+    publishJobId:
+      pickStringValue(request.params?.publishJobId) ??
+      pickStringValue(request.body?.publishJobId) ??
+      pickStringValue(request.query?.publishJobId),
+    publishedPostId:
+      pickStringValue(request.params?.publishedPostId) ??
+      pickStringValue(request.body?.publishedPostId) ??
+      pickStringValue(request.query?.publishedPostId)
+  };
+}
+
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -100,13 +125,96 @@ export class SessionAuthGuard implements CanActivate {
       throw new UnauthorizedException("Invalid or expired session");
     }
 
-    const workspaceId = extractWorkspaceId(request);
-    if (workspaceId) {
-      if (!isUuid(workspaceId)) {
+    const explicitWorkspaceId = extractWorkspaceId(request);
+    if (explicitWorkspaceId && !isUuid(explicitWorkspaceId)) {
+      throw new ForbiddenException("Workspace access denied");
+    }
+
+    const scopedResourceIds = extractScopedResourceIds(request);
+    const hasScopedResourceId = Boolean(
+      scopedResourceIds.contentId ||
+        scopedResourceIds.accountId ||
+        scopedResourceIds.publishJobId ||
+        scopedResourceIds.publishedPostId
+    );
+
+    const pool = getPool();
+    let derivedWorkspaceId: string | null = null;
+    if (scopedResourceIds.contentId) {
+      if (!isUuid(scopedResourceIds.contentId)) {
         throw new ForbiddenException("Workspace access denied");
       }
+      const contentWorkspaceResult = await pool.query<{ workspace_id: string }>(
+        `
+          SELECT workspace_id
+          FROM contents
+          WHERE id = $1
+          LIMIT 1;
+        `,
+        [scopedResourceIds.contentId]
+      );
+      derivedWorkspaceId = contentWorkspaceResult.rows[0]?.workspace_id ?? null;
+    }
 
-      const membershipResult = await getPool().query<{ ok: number }>(
+    if (!derivedWorkspaceId && scopedResourceIds.accountId) {
+      if (!isUuid(scopedResourceIds.accountId)) {
+        throw new ForbiddenException("Workspace access denied");
+      }
+      const accountWorkspaceResult = await pool.query<{ workspace_id: string }>(
+        `
+          SELECT workspace_id
+          FROM x_accounts
+          WHERE id = $1
+          LIMIT 1;
+        `,
+        [scopedResourceIds.accountId]
+      );
+      derivedWorkspaceId = accountWorkspaceResult.rows[0]?.workspace_id ?? null;
+    }
+
+    if (!derivedWorkspaceId && scopedResourceIds.publishJobId) {
+      if (!isUuid(scopedResourceIds.publishJobId)) {
+        throw new ForbiddenException("Workspace access denied");
+      }
+      const publishJobWorkspaceResult = await pool.query<{ workspace_id: string }>(
+        `
+          SELECT workspace_id
+          FROM publish_jobs
+          WHERE id = $1
+          LIMIT 1;
+        `,
+        [scopedResourceIds.publishJobId]
+      );
+      derivedWorkspaceId = publishJobWorkspaceResult.rows[0]?.workspace_id ?? null;
+    }
+
+    if (!derivedWorkspaceId && scopedResourceIds.publishedPostId) {
+      if (!isUuid(scopedResourceIds.publishedPostId)) {
+        throw new ForbiddenException("Workspace access denied");
+      }
+      const publishedWorkspaceResult = await pool.query<{ workspace_id: string }>(
+        `
+          SELECT workspace_id
+          FROM published_posts
+          WHERE id = $1
+          LIMIT 1;
+        `,
+        [scopedResourceIds.publishedPostId]
+      );
+      derivedWorkspaceId = publishedWorkspaceResult.rows[0]?.workspace_id ?? null;
+    }
+
+    if (explicitWorkspaceId && derivedWorkspaceId && explicitWorkspaceId !== derivedWorkspaceId) {
+      throw new ForbiddenException("Workspace access denied");
+    }
+
+    const workspaceId = explicitWorkspaceId ?? derivedWorkspaceId;
+    if (hasScopedResourceId && !workspaceId) {
+      throw new ForbiddenException("Workspace access denied");
+    }
+
+    if (workspaceId) {
+      const membershipResult = await pool.query<{ ok: number }>(
         `
           SELECT 1 AS ok
           FROM workspace_members

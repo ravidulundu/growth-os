@@ -278,6 +278,10 @@ async function processPublishJob(publishJobId: string) {
       [publishJobId]
     );
 
+    let activeWorkspaceId = jobRow.workspace_id;
+    let activeAccountId = jobRow.account_id;
+    let activeContentId = jobRow.content_id;
+    let completionBaseState: SchedulerState = inProgressState;
     let publishedPostId = existingPublished.rows[0]?.id;
     let externalPostId = existingPublished.rows[0]?.external_post_id;
 
@@ -302,7 +306,43 @@ async function processPublishJob(publishJobId: string) {
       }
 
       const accessToken = decryptSecret(tokenResult.rows[0].access_token_encrypted);
+      // Release row lock before external call to avoid long-lived DB transactions on slow X API.
+      await client.query("COMMIT");
+
       const publishResult = await publishPost(accessToken, contentResult.rows[0].current_text);
+      await client.query("BEGIN");
+      const currentJobResult = await client.query<{
+        workspace_id: string;
+        account_id: string;
+        content_id: string;
+        state: SchedulerState;
+      }>(
+        `
+          SELECT workspace_id, account_id, content_id, state
+          FROM publish_jobs
+          WHERE id = $1
+          FOR UPDATE;
+        `,
+        [publishJobId]
+      );
+
+      const currentJob = currentJobResult.rows[0];
+      if (!currentJob) {
+        throw Object.assign(new Error("Publish job not found during finalize"), {
+          code: "PUBLISH_JOB_NOT_FOUND",
+          transient: false
+        });
+      }
+
+      if (["completed", "failed_permanent", "cancelled"].includes(currentJob.state)) {
+        await client.query("COMMIT");
+        return;
+      }
+
+      activeWorkspaceId = currentJob.workspace_id;
+      activeAccountId = currentJob.account_id;
+      activeContentId = currentJob.content_id;
+      completionBaseState = currentJob.state;
 
       const insertedPublished = await client.query<{ id: string; external_post_id: string }>(
         `
@@ -320,9 +360,9 @@ async function processPublishJob(publishJobId: string) {
           RETURNING id, external_post_id;
         `,
         [
-          jobRow.workspace_id,
-          jobRow.account_id,
-          jobRow.content_id,
+          activeWorkspaceId,
+          activeAccountId,
+          activeContentId,
           publishJobId,
           publishResult.externalPostId,
           publishResult.publishedAt
@@ -339,7 +379,7 @@ async function processPublishJob(publishJobId: string) {
               updated_at = now()
           WHERE id = $1;
         `,
-        [jobRow.content_id]
+        [activeContentId]
       );
     }
 
@@ -348,7 +388,7 @@ async function processPublishJob(publishJobId: string) {
         INSERT INTO usage_events (workspace_id, account_id, event_type, endpoint_key, units, metadata)
         VALUES ($1, $2, 'x.publish', 'tweet.write', 1, $3::jsonb);
       `,
-      [jobRow.workspace_id, jobRow.account_id, JSON.stringify({ publishJobId })]
+      [activeWorkspaceId, activeAccountId, JSON.stringify({ publishJobId })]
     );
 
     await client.query(
@@ -356,10 +396,10 @@ async function processPublishJob(publishJobId: string) {
         INSERT INTO audit_logs (workspace_id, action, entity_type, entity_id, result)
         VALUES ($1, 'publish.completed', 'publish_job', $2, 'success');
       `,
-      [jobRow.workspace_id, publishJobId]
+      [activeWorkspaceId, publishJobId]
     );
 
-    const completedState = nextSchedulerState("in_progress", "complete");
+    const completedState = nextSchedulerState(completionBaseState, "complete");
     await client.query(
       `
         UPDATE publish_jobs
@@ -376,8 +416,8 @@ async function processPublishJob(publishJobId: string) {
     await client.query("COMMIT");
     if (publishedPostId && externalPostId) {
       postCommitMetricsPayload = {
-        workspaceId: jobRow.workspace_id,
-        accountId: jobRow.account_id,
+        workspaceId: activeWorkspaceId,
+        accountId: activeAccountId,
         publishedPostId,
         xPostId: externalPostId
       };
@@ -396,7 +436,12 @@ async function processPublishJob(publishJobId: string) {
       const stateResult = await recoveryClient.query<{
         attempt_count: number;
         state: SchedulerState;
-      }>(`SELECT attempt_count, state FROM publish_jobs WHERE id = $1 FOR UPDATE`, [publishJobId]);
+        content_id: string;
+        workspace_id: string;
+      }>(
+        `SELECT attempt_count, state, content_id, workspace_id FROM publish_jobs WHERE id = $1 FOR UPDATE`,
+        [publishJobId]
+      );
 
       if (!stateResult.rows[0]) {
         await recoveryClient.query("ROLLBACK");
@@ -436,16 +481,97 @@ async function processPublishJob(publishJobId: string) {
         );
         await recoveryClient.query("COMMIT");
 
-        await publishQueue.add(
-          "publish",
-          { publishJobId },
-          {
-            jobId: `publish:${publishJobId}:retry:${attempt}`,
-            delay: delayMs,
-            removeOnComplete: true,
-            removeOnFail: 100
+        try {
+          await publishQueue.add(
+            "publish",
+            { publishJobId },
+            {
+              jobId: `publish:${publishJobId}:retry:${attempt}`,
+              delay: delayMs,
+              removeOnComplete: true,
+              removeOnFail: 100
+            }
+          );
+        } catch (enqueueError) {
+          const enqueueRecoveryClient = await dbPool.connect();
+          try {
+            await enqueueRecoveryClient.query("BEGIN");
+            const enqueueStateResult = await enqueueRecoveryClient.query<{
+              state: SchedulerState;
+              content_id: string;
+              workspace_id: string;
+            }>(
+              `
+                SELECT state, content_id, workspace_id
+                FROM publish_jobs
+                WHERE id = $1
+                FOR UPDATE;
+              `,
+              [publishJobId]
+            );
+
+            if (enqueueStateResult.rows[0]) {
+              const enqueueFailureState = nextSchedulerState(
+                enqueueStateResult.rows[0].state,
+                "fail_permanent"
+              );
+              await enqueueRecoveryClient.query(
+                `
+                  UPDATE publish_jobs
+                  SET state = $2,
+                      last_error_code = $3,
+                      last_error_message = $4,
+                      locked_at = NULL,
+                      locked_by = NULL,
+                      updated_at = now()
+                  WHERE id = $1;
+                `,
+                [
+                  publishJobId,
+                  enqueueFailureState,
+                  "RETRY_ENQUEUE_FAILED",
+                  enqueueError instanceof Error ? enqueueError.message : "Retry enqueue failed"
+                ]
+              );
+              await enqueueRecoveryClient.query(
+                `
+                  UPDATE contents
+                  SET status = 'draft',
+                      updated_at = now()
+                  WHERE id = $1
+                    AND status = 'scheduled';
+                `,
+                [enqueueStateResult.rows[0].content_id]
+              );
+              await enqueueRecoveryClient.query(
+                `
+                  INSERT INTO audit_logs (workspace_id, action, entity_type, entity_id, result, metadata)
+                  VALUES ($1, 'publish.failed_permanent', 'publish_job', $2, 'failure', $3::jsonb);
+                `,
+                [
+                  enqueueStateResult.rows[0].workspace_id,
+                  publishJobId,
+                  JSON.stringify({
+                    code: "RETRY_ENQUEUE_FAILED",
+                    message:
+                      enqueueError instanceof Error ? enqueueError.message : "Retry enqueue failed",
+                    originalCode: classified.code
+                  })
+                ]
+              );
+            }
+            await enqueueRecoveryClient.query("COMMIT");
+          } catch {
+            try {
+              await enqueueRecoveryClient.query("ROLLBACK");
+            } catch {
+              // noop
+            }
+          } finally {
+            enqueueRecoveryClient.release();
           }
-        );
+          throw enqueueError;
+        }
         return;
       }
 
@@ -462,6 +588,16 @@ async function processPublishJob(publishJobId: string) {
           WHERE id = $1;
         `,
         [publishJobId, permanentFailureState, classified.code, classified.message]
+      );
+      await recoveryClient.query(
+        `
+          UPDATE contents
+          SET status = 'draft',
+              updated_at = now()
+          WHERE id = $1
+            AND status = 'scheduled';
+        `,
+        [stateResult.rows[0].content_id]
       );
       await recoveryClient.query(
         `
