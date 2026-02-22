@@ -293,3 +293,38 @@
 - `pnpm --filter @growth-os/api build` -> pass
 - `pnpm --filter @growth-os/worker build` -> pass
 - `pnpm quality:gate:push` -> pass
+
+## Next Plan (PR Review Closure Round 3)
+
+- [x] Açık review thread listesini tekrar çıkar (`scripts/check-pr-review-threads.mjs`)
+- [x] Aksiyon gerektiren yorumları kodda düzelt:
+  - `publishNow` implicit dedupe anahtarı
+  - E2E mock API cookie adı prod ile hizalama
+  - token-vault payload parse strictliği
+  - `.env.example` için same-origin API base varsayılanı
+- [x] İlgili testleri ekle/güncelle:
+  - shared token-vault edge case unit
+  - scheduling publishNow implicit dedupe integration
+- [x] Doğrulama çalıştır:
+  - `pnpm --filter @growth-os/shared test`
+  - `pnpm --filter @growth-os/api exec tsx --test src/modules/scheduling/tests/scheduling.publishNow.safeModeAndDedupe.integration.test.ts`
+  - `pnpm --filter @growth-os/web test:e2e`
+  - `pnpm lint`
+  - `pnpm typecheck`
+- [x] Tüm değişiklikleri tek commit olarak gönder
+- [x] Her açık thread’e kısa not bırak ve resolve et
+
+### Round 3 Progress
+
+- `apps/api/src/modules/scheduling/scheduling.service.ts`
+  - `publishNow` artık implicit çağrıda dakika-bucket tabanlı dedupe key üretiyor.
+- `apps/api/src/modules/scheduling/tests/scheduling.publishNow.safeModeAndDedupe.integration.test.ts`
+  - dedupeKey verilmeden art arda `publishNow` çağrısında `ConflictException` beklentisi eklendi.
+- `packages/shared/src/security/token-vault.ts`
+  - `decodeParts` için `parts.length === 3` zorunluluğu eklendi (fazla segment reject).
+- `packages/shared/tests/shared-core.test.ts`
+  - ekstra segmentli payload için `decryptSecret` reject testi eklendi.
+- `apps/web/e2e/mock-api/server.mjs`
+  - E2E mock session cookie adı `session_token` ile prod davranışına hizalandı.
+- `.env.example`
+  - `NEXT_PUBLIC_API_URL` varsayılanı `/api` yapıldı (cross-origin cookie edge-case azaltımı).

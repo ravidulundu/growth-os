@@ -58,7 +58,11 @@ function encodeParts(iv: Buffer, ciphertext: Buffer, authTag: Buffer) {
 }
 
 function decodeParts(payload: string) {
-  const [ivPart, cipherPart, tagPart] = payload.split(".");
+  const parts = payload.split(".");
+  if (parts.length !== 3) {
+    throw new Error("Invalid encrypted payload format");
+  }
+  const [ivPart, cipherPart, tagPart] = parts;
   if (!ivPart || !cipherPart || !tagPart) {
     throw new Error("Invalid encrypted payload format");
   }

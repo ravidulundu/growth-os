@@ -22,3 +22,5 @@
 - Maliyetli dış API çağrısı olan akışlarda (LLM vb.) limit/uygunluk precheck’i çağrıdan önce koy; nihai limit kontrolünü transaction içinde ikinci kez koruyarak race riskini yönet.
 - Review thread güvenlik yorumlarında yalnız davranış fix’i yetmez; env parse (`Number(...)`) gibi config güvenliği için finite/range doğrulaması ekle.
 - CI branch koşullarında staging/prod ayrımını workflow `if` bloklarında açık ve tekil tut; yanlış branch eşleşmesi sessizce yanlış deploy zinciri başlatabilir.
+- `publishNow` gibi "hemen çalıştır" uçlarında zaman-damgası bazlı dedupe varsayılanı çift tıklamayı engellemez; implicit dedupe için sabit/bucket anahtar üret.
+- E2E mock katmanında cookie adı/shape prod ile farklıysa auth regresyonları kaçabilir; mock kontratını prod cookie adıyla birebir tut.

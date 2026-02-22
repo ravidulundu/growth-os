@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { URL } from "node:url";
 
 const port = Number(process.env.MOCK_API_PORT ?? 4100);
-const sessionCookieName = "growth_os_session";
+const sessionCookieName = "session_token";
 const validMagicToken = "valid-token";
 const validSessionToken = "valid-session";
 const userId = "11111111-1111-4111-8111-111111111111";

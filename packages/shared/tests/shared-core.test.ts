@@ -37,3 +37,9 @@ test("encryptSecret/decryptSecret roundtrip", () => {
   const payload = encryptSecret("token-value", key);
   assert.equal(decryptSecret(payload, key), "token-value");
 });
+
+test("decryptSecret rejects payloads with extra dot-separated segments", () => {
+  const key = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  const payload = `${encryptSecret("token-value", key)}.extra`;
+  assert.throws(() => decryptSecret(payload, key), /Invalid encrypted payload format/);
+});

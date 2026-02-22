@@ -14,6 +14,12 @@ function defaultDedupeKey(contentId: string, runAt: Date) {
   return createHash("sha256").update(`${contentId}:${runAt.toISOString()}`).digest("hex");
 }
 
+function publishNowDedupeKey(contentId: string, runAt: Date) {
+  // Use minute-level buckets to block accidental double-click publishes while allowing later retries.
+  const minuteBucket = Math.floor(runAt.getTime() / 60_000);
+  return createHash("sha256").update(`${contentId}:publish-now:${minuteBucket}`).digest("hex");
+}
+
 function safeModeEnabled() {
   return (process.env.SAFE_MODE_ENABLED ?? "true").toLowerCase() !== "false";
 }
@@ -233,7 +239,9 @@ export class SchedulingService {
     dedupeKey?: string;
     confirmHumanReview?: boolean;
   }) {
-    return this.schedule({ ...params, runAt: new Date() });
+    const runAt = new Date();
+    const dedupeKey = params.dedupeKey ?? publishNowDedupeKey(params.contentId, runAt);
+    return this.schedule({ ...params, runAt, dedupeKey });
   }
 
   async listJobs(workspaceId: string) {

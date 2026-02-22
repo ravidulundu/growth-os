@@ -111,4 +111,41 @@ test("scheduling.publishNow.safeModeAndDedupe.integration", async (t) => {
       }),
     (error) => error instanceof ConflictException
   );
+
+  const implicitContentResult = await pool.query<{ id: string }>(
+    `
+      INSERT INTO contents (
+        workspace_id,
+        account_id,
+        type,
+        status,
+        topic,
+        prompt_input,
+        current_text
+      )
+      VALUES ($1, $2, 'tweet', 'draft', 'topic-implicit', 'topic-implicit', 'publish me implicitly')
+      RETURNING id;
+    `,
+    [workspaceId, accountId]
+  );
+  const implicitContentId = implicitContentResult.rows[0].id;
+
+  const implicitFirst = await service.publishNow({
+    workspaceId,
+    accountId,
+    contentId: implicitContentId,
+    confirmHumanReview: true
+  });
+  assert.equal(implicitFirst.ok, true);
+
+  await assert.rejects(
+    () =>
+      service.publishNow({
+        workspaceId,
+        accountId,
+        contentId: implicitContentId,
+        confirmHumanReview: true
+      }),
+    (error) => error instanceof ConflictException
+  );
 });
