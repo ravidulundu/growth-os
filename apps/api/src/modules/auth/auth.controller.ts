@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Post } from "@nestjs/common";
 import { z } from "zod";
+import { Public } from "../../shared/auth/public.decorator";
 import { AuthService } from "./auth.service";
 
 const requestSchema = z.object({
@@ -11,6 +12,7 @@ const verifySchema = z.object({
 });
 
 @Controller("auth")
+@Public()
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 

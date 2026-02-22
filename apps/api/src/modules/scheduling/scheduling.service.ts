@@ -8,6 +8,7 @@ import {
 import { createHash } from "node:crypto";
 import { getPool } from "../../shared/db/pool";
 import { getPublishQueue } from "./queue";
+import { nextSchedulerState } from "./state-machine";
 
 function defaultDedupeKey(contentId: string, runAt: Date) {
   return createHash("sha256").update(`${contentId}:${runAt.toISOString()}`).digest("hex");
@@ -157,47 +158,62 @@ export class SchedulingService {
       );
     } catch (error) {
       const message = String((error as { message?: string }).message ?? "Queue enqueue failed");
+      const recoveryClient = await this.dbPool().connect();
 
-      await this.dbPool().query(
-        `
-          UPDATE publish_jobs
-          SET state = 'failed_permanent',
-              last_error_code = 'QUEUE_ENQUEUE_FAILED',
-              last_error_message = $2,
-              locked_at = NULL,
-              locked_by = NULL,
-              updated_at = now()
-          WHERE id = $1;
-        `,
-        [publishJobId, message]
-      );
+      try {
+        await recoveryClient.query("BEGIN");
+        const failedState = nextSchedulerState("queued", "fail_permanent");
 
-      await this.dbPool().query(
-        `
-          UPDATE contents
-          SET status = 'draft',
-              updated_at = now()
-          WHERE id = $1
-            AND status = 'scheduled';
-        `,
-        [params.contentId]
-      );
+        await recoveryClient.query(
+          `
+            UPDATE publish_jobs
+            SET state = $2,
+                last_error_code = 'QUEUE_ENQUEUE_FAILED',
+                last_error_message = $3,
+                locked_at = NULL,
+                locked_by = NULL,
+                updated_at = now()
+            WHERE id = $1;
+          `,
+          [publishJobId, failedState, message]
+        );
 
-      await this.dbPool().query(
-        `
-          INSERT INTO audit_logs (workspace_id, action, entity_type, entity_id, result, metadata)
-          VALUES ($1, 'scheduling.enqueue', 'publish_job', $2, 'failure', $3::jsonb);
-        `,
-        [
-          params.workspaceId,
-          publishJobId,
-          JSON.stringify({
-            runAt: runAt.toISOString(),
-            dedupeKey,
-            reason: message
-          })
-        ]
-      );
+        await recoveryClient.query(
+          `
+            UPDATE contents
+            SET status = 'draft',
+                updated_at = now()
+            WHERE id = $1
+              AND status = 'scheduled';
+          `,
+          [params.contentId]
+        );
+
+        await recoveryClient.query(
+          `
+            INSERT INTO audit_logs (workspace_id, action, entity_type, entity_id, result, metadata)
+            VALUES ($1, 'scheduling.enqueue', 'publish_job', $2, 'failure', $3::jsonb);
+          `,
+          [
+            params.workspaceId,
+            publishJobId,
+            JSON.stringify({
+              runAt: runAt.toISOString(),
+              dedupeKey,
+              reason: message
+            })
+          ]
+        );
+        await recoveryClient.query("COMMIT");
+      } catch {
+        try {
+          await recoveryClient.query("ROLLBACK");
+        } catch {
+          // noop
+        }
+      } finally {
+        recoveryClient.release();
+      }
 
       throw new ServiceUnavailableException("Failed to enqueue publish job");
     }

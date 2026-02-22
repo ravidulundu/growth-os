@@ -3,6 +3,18 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 const ALGORITHM = "aes-256-gcm";
 const BASE64_32_BYTE_KEY_PATTERN =
   /^(?:[A-Za-z0-9+/]{43}=|[A-Za-z0-9+/]{44}|[A-Za-z0-9_-]{43}|[A-Za-z0-9_-]{44})$/;
+let derivedKeyWarningPrinted = false;
+
+function allowDerivedKeyFallback() {
+  const explicit = process.env.TOKEN_KEY_ALLOW_DERIVED?.trim().toLowerCase();
+  if (explicit === "true") {
+    return true;
+  }
+  if (explicit === "false") {
+    return false;
+  }
+  return process.env.NODE_ENV !== "production";
+}
 
 export function resolveEncryptionKey(rawKey: string) {
   const normalized = rawKey.trim();
@@ -16,6 +28,18 @@ export function resolveEncryptionKey(rawKey: string) {
     if (base64Candidate.length === 32) {
       return base64Candidate;
     }
+  }
+
+  if (!allowDerivedKeyFallback()) {
+    throw new Error("TOKEN_ENCRYPTION_KEY must be a 32-byte key encoded as 64-char hex or base64.");
+  }
+
+  if (!derivedKeyWarningPrinted) {
+    derivedKeyWarningPrinted = true;
+    console.warn(
+      "[token-vault] Using derived TOKEN_ENCRYPTION_KEY fallback (sha256 of raw input). " +
+        "Provide a 32-byte hex/base64 key for production."
+    );
   }
 
   // Dev-friendly fallback: derive a 32-byte key from arbitrary-length input.

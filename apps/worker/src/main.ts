@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
 import { Queue, QueueEvents, Worker } from "bullmq";
 import { config } from "dotenv";
-import { calculateBackoffDelayMs, decryptSecret as decryptSecretWithKey } from "@growth-os/shared";
+import {
+  calculateBackoffDelayMs,
+  cosineSimilarity,
+  decryptSecret as decryptSecretWithKey,
+  nextSchedulerState,
+  type SchedulerState
+} from "@growth-os/shared";
 import IORedis from "ioredis";
 import { Pool } from "pg";
 
@@ -99,32 +105,6 @@ function classifyPublishError(error: unknown) {
   };
 }
 
-function normalizeTextForSimilarity(text: string) {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter((token) => token.length > 2);
-}
-
-function jaccardSimilarity(left: string, right: string) {
-  const leftSet = new Set(normalizeTextForSimilarity(left));
-  const rightSet = new Set(normalizeTextForSimilarity(right));
-  if (leftSet.size === 0 && rightSet.size === 0) {
-    return 1;
-  }
-
-  let intersection = 0;
-  for (const token of leftSet) {
-    if (rightSet.has(token)) {
-      intersection += 1;
-    }
-  }
-
-  const union = new Set([...leftSet, ...rightSet]).size;
-  return union === 0 ? 0 : intersection / union;
-}
-
 async function storeMetricsSnapshot(params: {
   workspaceId: string;
   publishedPostId: string;
@@ -178,6 +158,14 @@ async function storeMetricsSnapshot(params: {
 async function processPublishJob(publishJobId: string) {
   const client = await dbPool.connect();
   const maxAttempts = Number(process.env.PUBLISH_MAX_ATTEMPTS ?? 8);
+  let postCommitMetricsPayload:
+    | {
+        workspaceId: string;
+        accountId: string;
+        publishedPostId: string;
+        xPostId: string;
+      }
+    | undefined;
 
   try {
     await client.query("BEGIN");
@@ -215,18 +203,26 @@ async function processPublishJob(publishJobId: string) {
       return;
     }
 
+    const inProgressState = nextSchedulerState(jobRow.state as SchedulerState, "start");
+    if (inProgressState === jobRow.state) {
+      throw Object.assign(new Error(`Invalid publish state transition from ${jobRow.state}`), {
+        code: "INVALID_STATE_TRANSITION",
+        transient: false
+      });
+    }
+
     const attempt = Number(jobRow.attempt_count) + 1;
     await client.query(
       `
         UPDATE publish_jobs
-        SET state = 'in_progress',
-            attempt_count = $2,
+        SET state = $2,
+            attempt_count = $3,
             locked_at = now(),
-            locked_by = $3,
+            locked_by = $4,
             updated_at = now()
         WHERE id = $1;
       `,
-      [publishJobId, attempt, "worker"]
+      [publishJobId, inProgressState, attempt, "worker"]
     );
 
     const contentResult = await client.query<{ current_text: string }>(
@@ -261,7 +257,7 @@ async function processPublishJob(publishJobId: string) {
     );
 
     const highestSimilarity = recentPublished.rows.reduce((max, row) => {
-      const score = jaccardSimilarity(contentResult.rows[0].current_text, row.current_text);
+      const score = cosineSimilarity(contentResult.rows[0].current_text, row.current_text);
       return score > max ? score : max;
     }, 0);
 
@@ -363,53 +359,28 @@ async function processPublishJob(publishJobId: string) {
       [jobRow.workspace_id, publishJobId]
     );
 
+    const completedState = nextSchedulerState("in_progress", "complete");
     await client.query(
       `
         UPDATE publish_jobs
-        SET state = 'completed',
+        SET state = $2,
             completed_at = now(),
             locked_at = NULL,
             locked_by = NULL,
             updated_at = now()
         WHERE id = $1;
       `,
-      [publishJobId]
+      [publishJobId, completedState]
     );
 
     await client.query("COMMIT");
-
-    const tokenResult = await dbPool.query<{ access_token_encrypted: string }>(
-      `
-        SELECT access_token_encrypted
-        FROM x_tokens
-        WHERE account_id = $1
-          AND revoked_at IS NULL
-        ORDER BY created_at DESC
-        LIMIT 1;
-      `,
-      [jobRow.account_id]
-    );
-
-    if (tokenResult.rows[0] && publishedPostId && externalPostId) {
-      const accessToken = decryptSecret(tokenResult.rows[0].access_token_encrypted);
-      await storeMetricsSnapshot({
+    if (publishedPostId && externalPostId) {
+      postCommitMetricsPayload = {
         workspaceId: jobRow.workspace_id,
+        accountId: jobRow.account_id,
         publishedPostId,
-        xPostId: externalPostId,
-        windowKey: "t15",
-        accessToken
-      });
-
-      await metricsQueue.add(
-        "metrics",
-        { publishedPostId, windowKey: "t60" },
-        { jobId: `metrics:${publishedPostId}:t60`, delay: 60 * 60_000, removeOnComplete: true }
-      );
-      await metricsQueue.add(
-        "metrics",
-        { publishedPostId, windowKey: "t24" },
-        { jobId: `metrics:${publishedPostId}:t24`, delay: 24 * 60 * 60_000, removeOnComplete: true }
-      );
+        xPostId: externalPostId
+      };
     }
   } catch (error) {
     try {
@@ -435,19 +406,20 @@ async function processPublishJob(publishJobId: string) {
       if (classified.transient && attempt < maxAttempts) {
         const delayMs = calculateBackoffDelayMs({ attempt });
         const nextRunAt = new Date(Date.now() + delayMs);
+        const retryState = nextSchedulerState("in_progress", "retry");
         await client.query(
           `
             UPDATE publish_jobs
-            SET state = 'retry_wait',
-                next_run_at = $2,
-                last_error_code = $3,
-                last_error_message = $4,
+            SET state = $2,
+                next_run_at = $3,
+                last_error_code = $4,
+                last_error_message = $5,
                 locked_at = NULL,
                 locked_by = NULL,
                 updated_at = now()
             WHERE id = $1;
           `,
-          [publishJobId, nextRunAt, classified.code, classified.message]
+          [publishJobId, retryState, nextRunAt, classified.code, classified.message]
         );
         await client.query(
           `
@@ -473,18 +445,19 @@ async function processPublishJob(publishJobId: string) {
         return;
       }
 
+      const permanentFailureState = nextSchedulerState("in_progress", "fail_permanent");
       await client.query(
         `
           UPDATE publish_jobs
-          SET state = 'failed_permanent',
-              last_error_code = $2,
-              last_error_message = $3,
+          SET state = $2,
+              last_error_code = $3,
+              last_error_message = $4,
               locked_at = NULL,
               locked_by = NULL,
               updated_at = now()
           WHERE id = $1;
         `,
-        [publishJobId, classified.code, classified.message]
+        [publishJobId, permanentFailureState, classified.code, classified.message]
       );
       await client.query(
         `
@@ -507,6 +480,61 @@ async function processPublishJob(publishJobId: string) {
     }
   } finally {
     client.release();
+  }
+
+  if (!postCommitMetricsPayload) {
+    return;
+  }
+
+  try {
+    const tokenResult = await dbPool.query<{ access_token_encrypted: string }>(
+      `
+        SELECT access_token_encrypted
+        FROM x_tokens
+        WHERE account_id = $1
+          AND revoked_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT 1;
+      `,
+      [postCommitMetricsPayload.accountId]
+    );
+
+    if (!tokenResult.rows[0]) {
+      return;
+    }
+
+    const accessToken = decryptSecret(tokenResult.rows[0].access_token_encrypted);
+    await storeMetricsSnapshot({
+      workspaceId: postCommitMetricsPayload.workspaceId,
+      publishedPostId: postCommitMetricsPayload.publishedPostId,
+      xPostId: postCommitMetricsPayload.xPostId,
+      windowKey: "t15",
+      accessToken
+    });
+
+    await metricsQueue.add(
+      "metrics",
+      { publishedPostId: postCommitMetricsPayload.publishedPostId, windowKey: "t60" },
+      {
+        jobId: `metrics:${postCommitMetricsPayload.publishedPostId}:t60`,
+        delay: 60 * 60_000,
+        removeOnComplete: true
+      }
+    );
+    await metricsQueue.add(
+      "metrics",
+      { publishedPostId: postCommitMetricsPayload.publishedPostId, windowKey: "t24" },
+      {
+        jobId: `metrics:${postCommitMetricsPayload.publishedPostId}:t24`,
+        delay: 24 * 60 * 60_000,
+        removeOnComplete: true
+      }
+    );
+  } catch (metricsError) {
+    console.error(
+      `[worker] post-publish metrics collection failed for publishJobId=${publishJobId}`,
+      metricsError
+    );
   }
 }
 

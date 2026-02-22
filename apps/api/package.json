@@ -7,9 +7,9 @@
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
     "test": "pnpm test:unit",
-    "test:unit": "tsx --test tests/**/*.test.ts",
-    "test:integration": "node scripts/check-integration-suites.mjs && tsx --test src/modules/**/tests/**/*.integration.test.ts",
-    "coverage:unit": "c8 --reporter=text --reporter=lcov --include 'src/modules/scheduling/**/*.ts' --include 'src/modules/x_integration/x-client.ts' --check-coverage --lines 70 --functions 70 --branches 60 --statements 70 tsx --test tests/**/*.test.ts",
+    "test:unit": "pnpm --filter @growth-os/shared build && tsx --test tests/**/*.test.ts",
+    "test:integration": "pnpm --filter @growth-os/shared build && node scripts/check-integration-suites.mjs && tsx --test src/modules/**/tests/**/*.integration.test.ts",
+    "coverage:unit": "pnpm --filter @growth-os/shared build && c8 --reporter=text --reporter=lcov --include 'src/modules/scheduling/**/*.ts' --include 'src/modules/x_integration/x-client.ts' --check-coverage --lines 70 --functions 70 --branches 60 --statements 70 tsx --test tests/**/*.test.ts",
     "db:migrate": "tsx src/shared/db/migrate.ts",
     "db:seed": "tsx src/shared/db/seed.ts",
     "db:cleanup:magic-links": "tsx src/shared/db/cleanup-magic-links.ts"

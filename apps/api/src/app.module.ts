@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { APP_GUARD } from "@nestjs/core";
 import { AnalyticsController } from "./modules/analytics/analytics.controller";
 import { AnalyticsService } from "./modules/analytics/analytics.service";
 import { AuthController } from "./modules/auth/auth.controller";
@@ -11,6 +12,7 @@ import { StyleController } from "./modules/style/style.controller";
 import { StyleService } from "./modules/style/style.service";
 import { XIntegrationController } from "./modules/x_integration/x-integration.controller";
 import { XIntegrationService } from "./modules/x_integration/x-integration.service";
+import { SessionAuthGuard } from "./shared/auth/session-auth.guard";
 import { HealthController } from "./shared/health/health.controller";
 
 @Module({
@@ -25,6 +27,10 @@ import { HealthController } from "./shared/health/health.controller";
     AnalyticsController
   ],
   providers: [
+    {
+      provide: APP_GUARD,
+      useClass: SessionAuthGuard
+    },
     AuthService,
     XIntegrationService,
     StyleService,
