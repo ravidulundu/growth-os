@@ -174,7 +174,7 @@
 - [x] Kritik/aksiyon gerektiren yorumları kodda düzelt (`runtime-policy`, `session guard`, `auth map`, `smtp`, `queue`, `similarity`, `generation template`)
 - [x] İlgili regresyon testlerini ekle/güncelle
 - [x] Lint + typecheck + unit/integration doğrulamalarını çalıştır
-- [ ] Tek commit + thread reply/resolve adımını tamamla
+- [x] Tek commit + thread reply/resolve adımını tamamla
 
 ### PR Review Closure Progress
 
