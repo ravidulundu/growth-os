@@ -321,6 +321,8 @@ async function processPublishJob(publishJobId: string) {
 
       const accessToken = decryptSecret(tokenResult.rows[0].access_token_encrypted);
       // Release row lock before external call to avoid long-lived DB transactions on slow X API.
+      // Tradeoff: if X publish succeeds but finalize transaction fails, the post can exist on X
+      // before we persist published_posts. See docs/runbooks/publish-duplication-incident.md.
       await client.query("COMMIT");
 
       const publishResult = await publishPost(accessToken, contentResult.rows[0].current_text);
