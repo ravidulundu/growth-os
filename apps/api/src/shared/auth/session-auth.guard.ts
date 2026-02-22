@@ -1,4 +1,10 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from "@nestjs/common";
+import {
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException
+} from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { createHash } from "node:crypto";
 import { getPool } from "../db/pool";
@@ -18,6 +24,38 @@ function extractBearerToken(headerValue: string | string[] | undefined) {
   return token.trim();
 }
 
+function pickStringValue(value: unknown) {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  if (Array.isArray(value) && typeof value[0] === "string") {
+    const trimmed = value[0].trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  return null;
+}
+
+function extractWorkspaceId(request: {
+  params?: Record<string, unknown>;
+  body?: Record<string, unknown>;
+  query?: Record<string, unknown>;
+}) {
+  return (
+    pickStringValue(request.params?.workspaceId) ??
+    pickStringValue(request.body?.workspaceId) ??
+    pickStringValue(request.body?.workspace_id) ??
+    pickStringValue(request.query?.workspaceId) ??
+    pickStringValue(request.query?.workspace_id)
+  );
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 @Injectable()
 export class SessionAuthGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
@@ -33,7 +71,10 @@ export class SessionAuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<{
       headers: Record<string, string | string[] | undefined>;
-      auth?: { userId: string; sessionId: string };
+      params?: Record<string, unknown>;
+      body?: Record<string, unknown>;
+      query?: Record<string, unknown>;
+      auth?: { userId: string; sessionId: string; workspaceId?: string };
     }>();
     const token = extractBearerToken(request.headers.authorization);
     if (!token) {
@@ -59,9 +100,32 @@ export class SessionAuthGuard implements CanActivate {
       throw new UnauthorizedException("Invalid or expired session");
     }
 
+    const workspaceId = extractWorkspaceId(request);
+    if (workspaceId) {
+      if (!isUuid(workspaceId)) {
+        throw new ForbiddenException("Workspace access denied");
+      }
+
+      const membershipResult = await getPool().query<{ ok: number }>(
+        `
+          SELECT 1 AS ok
+          FROM workspace_members
+          WHERE workspace_id = $1
+            AND user_id = $2
+          LIMIT 1;
+        `,
+        [workspaceId, session.user_id]
+      );
+
+      if (!membershipResult.rows[0]) {
+        throw new ForbiddenException("Workspace access denied");
+      }
+    }
+
     request.auth = {
       userId: session.user_id,
-      sessionId: session.id
+      sessionId: session.id,
+      workspaceId: workspaceId ?? undefined
     };
 
     // Best-effort activity update; auth should not fail solely due to this.

@@ -13,7 +13,8 @@ function allowDerivedKeyFallback() {
   if (explicit === "false") {
     return false;
   }
-  return process.env.NODE_ENV !== "production";
+  const mode = process.env.NODE_ENV?.trim().toLowerCase() ?? "";
+  return mode === "" || mode === "development" || mode === "test" || mode === "ci";
 }
 
 export function resolveEncryptionKey(rawKey: string) {

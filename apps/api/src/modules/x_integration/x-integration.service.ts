@@ -12,17 +12,9 @@ function nowPlusMinutes(minutes: number) {
   return new Date(Date.now() + minutes * 60_000);
 }
 
-function pkceSecret() {
-  return (
-    process.env.X_PKCE_SECRET ??
-    process.env.TOKEN_ENCRYPTION_KEY ??
-    process.env.JWT_SECRET ??
-    "local-dev-pkce-secret"
-  );
-}
-
-function verifierFromState(state: string) {
-  return createHash("sha256").update(`${state}:${pkceSecret()}`).digest("base64url");
+function generateCodeVerifier() {
+  // RFC 7636 allows 43-128 chars from the unreserved URI set.
+  return randomBytes(48).toString("base64url");
 }
 
 function configuredScopes() {
@@ -43,15 +35,27 @@ export class XIntegrationService {
 
   async startConnect(workspaceId: string) {
     const state = randomBytes(24).toString("base64url");
-    const codeVerifier = verifierFromState(state);
+    const codeVerifier = generateCodeVerifier();
     const codeChallenge = base64UrlSha256(codeVerifier);
 
     await this.dbPool().query(
       `
-        INSERT INTO x_oauth_states (workspace_id, state_hash, code_verifier_hash, expires_at)
-        VALUES ($1, $2, $3, $4);
+        INSERT INTO x_oauth_states (
+          workspace_id,
+          state_hash,
+          code_verifier_hash,
+          code_verifier_encrypted,
+          expires_at
+        )
+        VALUES ($1, $2, $3, $4, $5);
       `,
-      [workspaceId, base64UrlSha256(state), base64UrlSha256(codeVerifier), nowPlusMinutes(15)]
+      [
+        workspaceId,
+        base64UrlSha256(state),
+        base64UrlSha256(codeVerifier),
+        encryptSecret(codeVerifier),
+        nowPlusMinutes(15)
+      ]
     );
 
     const redirectUri = process.env.X_REDIRECT_URI ?? "http://localhost:4000/x/connect/callback";
@@ -77,25 +81,36 @@ export class XIntegrationService {
     try {
       await client.query("BEGIN");
       const stateHash = base64UrlSha256(params.state);
-      const verifierHash = base64UrlSha256(verifierFromState(params.state));
-      const stateResult = await client.query<{ id: string }>(
+      const stateResult = await client.query<{
+        id: string;
+        code_verifier_hash: string;
+        code_verifier_encrypted: string | null;
+      }>(
         `
-          SELECT id
+          SELECT id, code_verifier_hash, code_verifier_encrypted
           FROM x_oauth_states
           WHERE workspace_id = $1
             AND state_hash = $2
-            AND code_verifier_hash = $3
             AND consumed_at IS NULL
             AND expires_at > now()
           ORDER BY created_at DESC
           LIMIT 1
           FOR UPDATE;
         `,
-        [params.workspaceId, stateHash, verifierHash]
+        [params.workspaceId, stateHash]
       );
 
       if (!stateResult.rows[0]) {
         throw new UnauthorizedException("Invalid or expired OAuth state");
+      }
+
+      if (!stateResult.rows[0].code_verifier_encrypted) {
+        throw new UnauthorizedException("OAuth verifier missing or invalid");
+      }
+
+      const codeVerifier = decryptSecret(stateResult.rows[0].code_verifier_encrypted);
+      if (base64UrlSha256(codeVerifier) !== stateResult.rows[0].code_verifier_hash) {
+        throw new UnauthorizedException("OAuth verifier mismatch");
       }
 
       await client.query("UPDATE x_oauth_states SET consumed_at = now() WHERE id = $1", [
@@ -103,7 +118,7 @@ export class XIntegrationService {
       ]);
 
       const token = await this.xClient().exchangeCodeForToken(params.code, {
-        codeVerifier: verifierFromState(params.state)
+        codeVerifier
       });
       const profile = await this.xClient().getProfile(token.accessToken);
 

@@ -393,10 +393,10 @@ async function processPublishJob(publishJobId: string) {
     try {
       await recoveryClient.query("BEGIN");
       const classified = classifyPublishError(error);
-      const stateResult = await recoveryClient.query<{ attempt_count: number }>(
-        `SELECT attempt_count FROM publish_jobs WHERE id = $1 FOR UPDATE`,
-        [publishJobId]
-      );
+      const stateResult = await recoveryClient.query<{
+        attempt_count: number;
+        state: SchedulerState;
+      }>(`SELECT attempt_count, state FROM publish_jobs WHERE id = $1 FOR UPDATE`, [publishJobId]);
 
       if (!stateResult.rows[0]) {
         await recoveryClient.query("ROLLBACK");
@@ -404,10 +404,13 @@ async function processPublishJob(publishJobId: string) {
       }
 
       const attempt = Number(stateResult.rows[0].attempt_count);
+      const currentState = stateResult.rows[0].state;
+      const processingState =
+        currentState === "in_progress" ? currentState : nextSchedulerState(currentState, "start");
       if (classified.transient && attempt < maxAttempts) {
         const delayMs = calculateBackoffDelayMs({ attempt });
         const nextRunAt = new Date(Date.now() + delayMs);
-        const retryState = nextSchedulerState("in_progress", "retry");
+        const retryState = nextSchedulerState(processingState, "retry");
         await recoveryClient.query(
           `
             UPDATE publish_jobs
@@ -446,7 +449,7 @@ async function processPublishJob(publishJobId: string) {
         return;
       }
 
-      const permanentFailureState = nextSchedulerState("in_progress", "fail_permanent");
+      const permanentFailureState = nextSchedulerState(processingState, "fail_permanent");
       await recoveryClient.query(
         `
           UPDATE publish_jobs

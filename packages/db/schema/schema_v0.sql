@@ -32,6 +32,20 @@ CREATE TABLE IF NOT EXISTS workspace_members (
 CREATE INDEX IF NOT EXISTS idx_workspace_members_user ON workspace_members(user_id);
 
 -- X integration
+CREATE TABLE IF NOT EXISTS x_oauth_states (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  state_hash TEXT NOT NULL,
+  code_verifier_hash TEXT NOT NULL,
+  code_verifier_encrypted TEXT,
+  expires_at TIMESTAMPTZ NOT NULL,
+  consumed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_x_oauth_states_workspace_expires
+  ON x_oauth_states(workspace_id, expires_at DESC);
+
 CREATE TABLE IF NOT EXISTS x_accounts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,

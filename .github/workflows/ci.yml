@@ -123,6 +123,7 @@ jobs:
     env:
       DATABASE_URL: postgres://postgres@localhost:55432/growth_os
       REDIS_URL: redis://localhost:56379
+      NODE_ENV: test
       TOKEN_ENCRYPTION_KEY: ci-dev-key
     steps:
       - uses: actions/checkout@v4
@@ -176,11 +177,13 @@ jobs:
         run: pnpm audit --prod --audit-level high
 
   deploy_staging:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && secrets.STAGING_DEPLOY_HOOK_URL != ''
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     needs: [build]
     environment:
       name: staging
+    env:
+      DEPLOY_HOOK_URL: ${{ secrets.STAGING_DEPLOY_HOOK_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -192,15 +195,19 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
+      - name: Skip deploy (missing STAGING_DEPLOY_HOOK_URL)
+        if: env.DEPLOY_HOOK_URL == ''
+        run: echo "STAGING_DEPLOY_HOOK_URL is not configured; skipping staging deploy."
       - name: Deploy Staging
-        env:
-          DEPLOY_HOOK_URL: ${{ secrets.STAGING_DEPLOY_HOOK_URL }}
+        if: env.DEPLOY_HOOK_URL != ''
         run: pnpm deploy:staging
 
   smoke_staging:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && secrets.STAGING_DEPLOY_HOOK_URL != '' && secrets.STAGING_SMOKE_BASE_URL != ''
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.deploy_staging.result == 'success'
     runs-on: ubuntu-latest
     needs: [deploy_staging]
+    env:
+      SMOKE_BASE_URL: ${{ secrets.STAGING_SMOKE_BASE_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -212,9 +219,11 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
+      - name: Skip smoke (missing STAGING_SMOKE_BASE_URL)
+        if: env.SMOKE_BASE_URL == ''
+        run: echo "STAGING_SMOKE_BASE_URL is not configured; skipping staging smoke tests."
       - name: Smoke Tests (Staging)
-        env:
-          SMOKE_BASE_URL: ${{ secrets.STAGING_SMOKE_BASE_URL }}
+        if: env.SMOKE_BASE_URL != ''
         run: pnpm smoke:test
 
   verify_prod_tag:
@@ -227,7 +236,7 @@ jobs:
           fetch-depth: 0
       - name: Verify Tag Commit Is On Main
         run: |
-          git fetch origin main --depth=1
+          git fetch origin main
           if git merge-base --is-ancestor "${GITHUB_SHA}" "origin/main"; then
             echo "Tag commit is reachable from main."
           else
@@ -236,11 +245,13 @@ jobs:
           fi
 
   deploy_prod:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && secrets.PRODUCTION_DEPLOY_HOOK_URL != ''
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     needs: [verify_prod_tag]
     environment:
       name: production
+    env:
+      DEPLOY_HOOK_URL: ${{ secrets.PRODUCTION_DEPLOY_HOOK_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -252,15 +263,19 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
+      - name: Skip deploy (missing PRODUCTION_DEPLOY_HOOK_URL)
+        if: env.DEPLOY_HOOK_URL == ''
+        run: echo "PRODUCTION_DEPLOY_HOOK_URL is not configured; skipping production deploy."
       - name: Deploy Production
-        env:
-          DEPLOY_HOOK_URL: ${{ secrets.PRODUCTION_DEPLOY_HOOK_URL }}
+        if: env.DEPLOY_HOOK_URL != ''
         run: pnpm deploy:prod
 
   smoke_prod:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && secrets.PRODUCTION_DEPLOY_HOOK_URL != '' && secrets.PRODUCTION_SMOKE_BASE_URL != ''
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.deploy_prod.result == 'success'
     runs-on: ubuntu-latest
     needs: [deploy_prod]
+    env:
+      SMOKE_BASE_URL: ${{ secrets.PRODUCTION_SMOKE_BASE_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -272,7 +287,9 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
+      - name: Skip smoke (missing PRODUCTION_SMOKE_BASE_URL)
+        if: env.SMOKE_BASE_URL == ''
+        run: echo "PRODUCTION_SMOKE_BASE_URL is not configured; skipping production smoke tests."
       - name: Smoke Tests (Production)
-        env:
-          SMOKE_BASE_URL: ${{ secrets.PRODUCTION_SMOKE_BASE_URL }}
+        if: env.SMOKE_BASE_URL != ''
         run: pnpm smoke:test
