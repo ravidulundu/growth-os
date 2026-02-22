@@ -16,12 +16,17 @@ function extractBearerToken(headerValue: string | string[] | undefined) {
     return null;
   }
 
-  const [scheme, token] = header.split(" ");
-  if (!scheme || !token || scheme.toLowerCase() !== "bearer") {
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  if (!match) {
     return null;
   }
 
-  return token.trim();
+  const token = match[1].trim();
+  if (!token) {
+    return null;
+  }
+
+  return token;
 }
 
 function pickStringValue(value: unknown) {
