@@ -30,7 +30,6 @@ test("x_integration.completeConnect.state_validation.integration", async (t) => 
       service.completeConnect({
         workspaceId,
         state: `${started.state}-tampered`,
-        codeVerifier: started.codeVerifier,
         code: "mock-auth-code-bad-state"
       }),
     { name: "UnauthorizedException" }
@@ -39,7 +38,6 @@ test("x_integration.completeConnect.state_validation.integration", async (t) => 
   const connected = await service.completeConnect({
     workspaceId,
     state: started.state,
-    codeVerifier: started.codeVerifier,
     code: "mock-auth-code-ok"
   });
 

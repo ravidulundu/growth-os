@@ -12,8 +12,17 @@ function nowPlusMinutes(minutes: number) {
   return new Date(Date.now() + minutes * 60_000);
 }
 
-function generatePkceVerifier() {
-  return randomBytes(32).toString("base64url");
+function pkceSecret() {
+  return (
+    process.env.X_PKCE_SECRET ??
+    process.env.TOKEN_ENCRYPTION_KEY ??
+    process.env.JWT_SECRET ??
+    "local-dev-pkce-secret"
+  );
+}
+
+function verifierFromState(state: string) {
+  return createHash("sha256").update(`${state}:${pkceSecret()}`).digest("base64url");
 }
 
 function configuredScopes() {
@@ -24,15 +33,17 @@ function configuredScopes() {
 
 @Injectable()
 export class XIntegrationService {
-  private readonly xClient = getXClient();
-
   protected dbPool() {
     return getPool();
   }
 
+  protected xClient() {
+    return getXClient();
+  }
+
   async startConnect(workspaceId: string) {
     const state = randomBytes(24).toString("base64url");
-    const codeVerifier = generatePkceVerifier();
+    const codeVerifier = verifierFromState(state);
     const codeChallenge = base64UrlSha256(codeVerifier);
 
     await this.dbPool().query(
@@ -56,23 +67,17 @@ export class XIntegrationService {
 
     return {
       authUrl: `https://x.com/i/oauth2/authorize?${params.toString()}`,
-      state,
-      codeVerifier
+      state
     };
   }
 
-  async completeConnect(params: {
-    workspaceId: string;
-    state: string;
-    codeVerifier: string;
-    code: string;
-  }) {
+  async completeConnect(params: { workspaceId: string; state: string; code: string }) {
     const client = await this.dbPool().connect();
 
     try {
       await client.query("BEGIN");
       const stateHash = base64UrlSha256(params.state);
-      const verifierHash = base64UrlSha256(params.codeVerifier);
+      const verifierHash = base64UrlSha256(verifierFromState(params.state));
       const stateResult = await client.query<{ id: string }>(
         `
           SELECT id
@@ -97,8 +102,10 @@ export class XIntegrationService {
         stateResult.rows[0].id
       ]);
 
-      const token = await this.xClient.exchangeCodeForToken(params.code);
-      const profile = await this.xClient.getProfile(token.accessToken);
+      const token = await this.xClient().exchangeCodeForToken(params.code, {
+        codeVerifier: verifierFromState(params.state)
+      });
+      const profile = await this.xClient().getProfile(token.accessToken);
 
       const accountResult = await client.query<{ id: string }>(
         `
@@ -207,7 +214,7 @@ export class XIntegrationService {
     }
 
     const accessToken = decryptSecret(tokenResult.rows[0].access_token_encrypted);
-    const timeline = await this.xClient.fetchTimeline(accessToken, limit);
+    const timeline = await this.xClient().fetchTimeline(accessToken, limit);
 
     const client = await this.dbPool().connect();
     try {

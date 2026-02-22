@@ -24,4 +24,16 @@ test("similarity.cosine.threshold.unit", () => {
     exceedsSimilarityThreshold("publish worker retry policy", "frontend color palette", 0.8),
     false
   );
+
+  const turkishNear = cosineSimilarity(
+    "küçük adımlarla ilerle, sade bir yayın planı oluştur",
+    "sade bir yayın planı oluşturup küçük adımlarla ilerle"
+  );
+  const turkishFar = cosineSimilarity(
+    "küçük adımlarla ilerle, sade bir yayın planı oluştur",
+    "fırında sebzeli lazanya tarifi ve akşam menüsü"
+  );
+
+  assert.ok(turkishNear > turkishFar);
+  assert.ok(turkishFar < 0.85);
 });

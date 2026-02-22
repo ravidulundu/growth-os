@@ -389,16 +389,17 @@ async function processPublishJob(publishJobId: string) {
       // noop
     }
 
+    const recoveryClient = await dbPool.connect();
     try {
-      await client.query("BEGIN");
+      await recoveryClient.query("BEGIN");
       const classified = classifyPublishError(error);
-      const stateResult = await client.query<{ attempt_count: number }>(
+      const stateResult = await recoveryClient.query<{ attempt_count: number }>(
         `SELECT attempt_count FROM publish_jobs WHERE id = $1 FOR UPDATE`,
         [publishJobId]
       );
 
       if (!stateResult.rows[0]) {
-        await client.query("ROLLBACK");
+        await recoveryClient.query("ROLLBACK");
         return;
       }
 
@@ -407,7 +408,7 @@ async function processPublishJob(publishJobId: string) {
         const delayMs = calculateBackoffDelayMs({ attempt });
         const nextRunAt = new Date(Date.now() + delayMs);
         const retryState = nextSchedulerState("in_progress", "retry");
-        await client.query(
+        await recoveryClient.query(
           `
             UPDATE publish_jobs
             SET state = $2,
@@ -421,7 +422,7 @@ async function processPublishJob(publishJobId: string) {
           `,
           [publishJobId, retryState, nextRunAt, classified.code, classified.message]
         );
-        await client.query(
+        await recoveryClient.query(
           `
             INSERT INTO audit_logs (workspace_id, action, entity_type, entity_id, result, metadata)
             SELECT workspace_id, 'publish.retry_scheduled', 'publish_job', id, 'failure', $2::jsonb
@@ -430,7 +431,7 @@ async function processPublishJob(publishJobId: string) {
           `,
           [publishJobId, JSON.stringify({ code: classified.code, message: classified.message })]
         );
-        await client.query("COMMIT");
+        await recoveryClient.query("COMMIT");
 
         await publishQueue.add(
           "publish",
@@ -446,7 +447,7 @@ async function processPublishJob(publishJobId: string) {
       }
 
       const permanentFailureState = nextSchedulerState("in_progress", "fail_permanent");
-      await client.query(
+      await recoveryClient.query(
         `
           UPDATE publish_jobs
           SET state = $2,
@@ -459,7 +460,7 @@ async function processPublishJob(publishJobId: string) {
         `,
         [publishJobId, permanentFailureState, classified.code, classified.message]
       );
-      await client.query(
+      await recoveryClient.query(
         `
           INSERT INTO audit_logs (workspace_id, action, entity_type, entity_id, result, metadata)
           SELECT workspace_id, 'publish.failed_permanent', 'publish_job', id, 'failure', $2::jsonb
@@ -468,15 +469,17 @@ async function processPublishJob(publishJobId: string) {
         `,
         [publishJobId, JSON.stringify({ code: classified.code, message: classified.message })]
       );
-      await client.query("COMMIT");
+      await recoveryClient.query("COMMIT");
     } catch (innerError) {
       console.error("[worker] publish error handling failed", innerError);
       try {
-        await client.query("ROLLBACK");
+        await recoveryClient.query("ROLLBACK");
       } catch {
         // noop
       }
       throw error;
+    } finally {
+      recoveryClient.release();
     }
   } finally {
     client.release();

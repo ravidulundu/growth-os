@@ -45,6 +45,9 @@ Not: `3000` doluysa `WEB_PORT=3010 pnpm dev` ile web portunu override edebilirsi
 - `pnpm test:integration`: integration testler
 - `pnpm coverage:api`: API coverage gate (%70+)
 - `pnpm quality:gate`: lint + typecheck + unit + integration + coverage + build
+- `pnpm deploy:staging`: staging deploy hook tetikler
+- `pnpm deploy:prod`: prod deploy hook tetikler
+- `pnpm smoke:test`: healthcheck + basic auth flow smoke testi
 
 ## MVP-0 API Akışı (Local)
 
@@ -65,15 +68,17 @@ Mail testi için MailHog'u profile ile ayağa kaldır:
 
 ## CI
 
-`.github/workflows/ci.yml`
-
-- guardrails (PR): branch name + commit convention
-- validate: `pnpm quality:gate` (format:check + lint + typecheck + test + build)
+- `.github/workflows/ci.yml`: lint -> typecheck -> unit -> integration -> build -> deploy
+- `.github/workflows/security.yml`: CodeQL + opsiyonel Snyk
+- Staging deploy: `develop` push (hook + smoke)
+- Prod deploy: `v0.x.y` tag (main üstünde doğrulama + smoke)
+- Manual approval: GitHub `production` environment required reviewers ile
 
 ## Engineering Rules
 
 - Engineering docs index: `docs/engineering/README.md`
 - Test strategy: `docs/engineering/test-strategy-and-quality-gates.md`
+- CI/CD pipeline: `docs/engineering/ci-cd-pipeline.md`
 - Branch check (local): `pnpm branch:check feat/my-change`
 - Commit convention check (local): `pnpm commitlint`
 - Full quality gate (local): `pnpm quality:gate`

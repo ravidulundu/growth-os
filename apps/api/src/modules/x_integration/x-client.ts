@@ -32,7 +32,10 @@ export type XPostMetrics = {
 };
 
 export interface XClient {
-  exchangeCodeForToken(code: string): Promise<XTokenExchangeResult>;
+  exchangeCodeForToken(
+    code: string,
+    options?: { codeVerifier?: string }
+  ): Promise<XTokenExchangeResult>;
   getProfile(accessToken: string): Promise<XProfile>;
   fetchTimeline(accessToken: string, limit: number): Promise<XTimelinePost[]>;
   publishPost(accessToken: string, text: string): Promise<XPublishResult>;
@@ -133,13 +136,23 @@ export class MockXClient implements XClient {
 }
 
 let cachedClient: XClient | undefined;
+let cachedMode: string | undefined;
+
+function currentMode() {
+  return (process.env.X_CLIENT_MODE ?? "mock").trim().toLowerCase();
+}
 
 export function getXClient(): XClient {
-  if (cachedClient) {
+  const mode = currentMode();
+  if (cachedClient && cachedMode === mode) {
     return cachedClient;
   }
 
-  // For MVP-0, we always default to mock mode unless an explicit non-mock client is added.
+  if (mode !== "mock") {
+    throw new Error(`Unsupported X client mode: ${mode}`);
+  }
+
+  cachedMode = mode;
   cachedClient = new MockXClient();
   return cachedClient;
 }

@@ -43,24 +43,24 @@ export class SchedulingService {
       );
     }
 
-    const contentResult = await this.dbPool().query<{ id: string }>(
-      `
-        SELECT id
-        FROM contents
-        WHERE id = $1
-          AND workspace_id = $2;
-      `,
-      [params.contentId, params.workspaceId]
-    );
-
-    if (!contentResult.rows[0]) {
-      throw new NotFoundException("Content not found");
-    }
-
     const client = await this.dbPool().connect();
 
     try {
       await client.query("BEGIN");
+      const contentResult = await client.query<{ id: string }>(
+        `
+          SELECT id
+          FROM contents
+          WHERE id = $1
+            AND workspace_id = $2
+          FOR UPDATE;
+        `,
+        [params.contentId, params.workspaceId]
+      );
+
+      if (!contentResult.rows[0]) {
+        throw new NotFoundException("Content not found");
+      }
 
       const result = await client.query<{ id: string }>(
         `

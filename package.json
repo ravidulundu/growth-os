@@ -31,7 +31,10 @@
     "db:seed": "pnpm --filter @growth-os/api db:seed",
     "db:cleanup:magic-links": "pnpm --filter @growth-os/api db:cleanup:magic-links",
     "seed": "pnpm --filter @growth-os/api db:seed",
-    "dev:prepare": "pnpm db:up && pnpm db:migrate && pnpm seed"
+    "dev:prepare": "pnpm db:up && pnpm db:migrate && pnpm seed",
+    "smoke:test": "node scripts/smoke-test.mjs",
+    "deploy:staging": "node scripts/deploy-hook.mjs staging",
+    "deploy:prod": "node scripts/deploy-hook.mjs production"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx,mjs,cjs}": [

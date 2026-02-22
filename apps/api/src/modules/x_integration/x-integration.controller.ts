@@ -8,7 +8,6 @@ const workspacePayloadSchema = z.object({
 
 const connectCallbackSchema = workspacePayloadSchema.extend({
   state: z.string().min(1),
-  codeVerifier: z.string().min(1),
   code: z.string().min(1)
 });
 

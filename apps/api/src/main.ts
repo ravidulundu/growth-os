@@ -3,7 +3,6 @@ import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, NestFastifyApplication } from "@nestjs/platform-fastify";
 import cors from "@fastify/cors";
-import { AppModule } from "./app.module";
 import { loadEnv } from "./shared/db/env";
 
 function allowedCorsOrigins() {
@@ -25,6 +24,7 @@ function allowedCorsOrigins() {
 
 async function bootstrap() {
   loadEnv();
+  const { AppModule } = await import("./app.module");
 
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
