@@ -1,0 +1,396 @@
+# Todo
+
+## Plan
+
+- [x] Coverage kapsamını mevcut durumdan çıkar (tek dosya yerine proje çekirdeği).
+- [x] Proje geneli coverage scriptlerini tanımla (`api`, `shared`, `ui`, `worker`).
+- [x] Root seviyede birleşik coverage komutu ekle.
+- [x] Çalıştırıp sonuçları raporla, kalite kapılarına entegre et.
+- [x] Gerekirse eşik/harici bırakma kararlarını açık ve savunulabilir şekilde düzelt.
+- [x] API coverage düşük modülleri için integration test ekle (`analytics`, `style`, `generation`, `auth/better-auth`, `session guard`).
+- [x] API coverage raporunu tekrar al ve 99 hedef gap'ini netleştir.
+
+## Review
+
+- Yeni komut eklendi: `pnpm coverage:project`.
+- `pnpm coverage:api` tek-dosya ölçümü yerine `@growth-os/api coverage:project` çalıştıracak şekilde düzeltildi.
+- `quality:gate` ve `quality:gate:push` coverage için `coverage:project` kullanacak şekilde güncellendi.
+- Kapsamlı ölçüm sonucu (tek dosya yerine proje çekirdeği):
+  - `@growth-os/shared`: Stmts 72.93 / Branch 78.57 / Func 81.81 / Lines 72.93
+  - `@growth-os/ui`: Stmts 100 / Branch 77.77 / Func 100 / Lines 100
+  - `@growth-os/worker`: Stmts 100 / Branch 87.5 / Func 100 / Lines 100 (`src/main.ts` hariç)
+  - `@growth-os/api`: Stmts 54.19 / Branch 69.41 / Func 80.31 / Lines 54.19
+- Eşik kararı: Proje geneli coverage görünürlüğü açıldı; gerçek oranlar düşük olduğu için bu aşamada yüksek threshold dayatılmadı. Sonraki iterasyonda modül bazlı test artışıyla kademeli eşik eklenecek.
+- Coverage iyileştirme sonrası API sonucu:
+  - Önce: Stmts 54.19 / Branch 69.41 / Func 80.31 / Lines 54.19
+  - Sonra: Stmts 81.01 / Branch 67.02 / Func 93.06 / Lines 81.01
+- 99 hedef gap: en büyük açıklar `generation.service.ts`, `scheduling.service.ts`, `session-auth.guard.ts` branch/path coverage.
+
+## Next Plan (Gap Implementation)
+
+- [x] Real X Client (`X_CLIENT_MODE=real`) implementasyonu: OAuth token exchange, profile, timeline, publish, metrics
+- [x] `x-client.ts` içinde mock+real mode seçimi ve production guard güncellemesi
+- [x] X entegrasyonuna gerekli env doğrulama ve hata eşleme eklenmesi
+- [x] Unit/integration testlerin mode ayrımına göre güncellenmesi
+- [x] Sonuç doğrulama: lint + typecheck + ilgili testler
+
+### Gap Progress
+
+- Real X Client eklendi (`apps/api/src/modules/x_integration/x-client.ts`)
+- `getXClient()` artık `mock|real` modunu destekliyor
+- Real mode için env fail-fast kontrolleri var (`X_CLIENT_ID`, `X_REDIRECT_URI`)
+- X HTTP hata eşleme eklendi (`RATE_LIMIT`, `X_TEMPORARY_ERROR`, `AUTH_FAILED`, `POLICY_REJECTED`)
+- Testler:
+  - Unit: real flow + 429 mapping + real mode cache/env
+  - Integration: x_integration suite dahil 7/7 pass
+
+## Next Plan (Style Extraction Gap)
+
+- [x] `style.service.ts` profil şemasını rapordaki eksik alanlarla genişlet
+- [x] Vocabulary + hook pattern + do/don't + CTA pattern heuristik çıkarımını ekle
+- [x] Format tercihi, cümle ritmi, dil/argo, humor/sarcasm skoru alanlarını üret
+- [x] Style unit/integration testlerini yeni şemaya göre güncelle
+- [x] Lint + typecheck + style testlerini çalıştırıp sonucu doğrula
+
+### Style Gap Progress
+
+- `apps/api/src/modules/style/style.service.ts` profil şeması genişletildi (vocabulary, hooks, do/don't, ctaPatterns, brandSafetyNotes, sentenceRhythm).
+- `apps/api/tests/style/style-extraction.test.ts` yeni alanlar için assertion'lar eklendi.
+- `apps/api/src/modules/style/tests/style.extractAndGetProfile.integration.test.ts` persist edilen yeni profil alanları doğrulandı.
+- `apps/api/tests/generation/generation.buildGeneratedText.styleConstraints.unit.test.ts` yeni `StyleProfile` tipine uyumlandırıldı.
+- Doğrulama:
+  - `pnpm --filter @growth-os/api test:unit -- tests/style/style-extraction.test.ts tests/generation/generation.buildGeneratedText.styleConstraints.unit.test.ts` pass
+  - `pnpm --filter @growth-os/api lint` pass
+  - `pnpm --filter @growth-os/api typecheck` pass
+  - `pnpm --filter @growth-os/api test:integration -- src/modules/style/tests/style.extractAndGetProfile.integration.test.ts` pass
+
+## Next Plan (Generation Gap: Reply/Quote + Guardrails)
+
+- [x] `generation` içerik tiplerini `reply` ve `quote` ile genişlet
+- [x] DB migration ile `contents.type` constraint ve `prompt_templates` tablosunu hizala
+- [x] Template-tabanlı prompt çözümleme (workspace + content type) ekle
+- [x] Guardrail katmanı ekle (duplicate line dedupe + CTA spam azaltma + iddia yumuşatma)
+- [x] API/Web tiplerini ve Generator UI içerik tipi seçimlerini güncelle
+- [x] Unit + integration testleri yeni davranışa göre ekle/güncelle
+- [x] Lint + typecheck + ilgili testleri çalıştırıp doğrula
+
+### Generation Gap Progress
+
+- Migration eklendi: `packages/db/migrations/008_generation_reply_quote_templates.sql`
+  - `contents.type` constraint artık `tweet|thread|reply|quote`
+  - `prompt_templates` tablosu ve index eklendi
+- `apps/api/src/modules/generation/generation.service.ts`
+  - `ContentType` genişletildi (`reply`, `quote`)
+  - Workspace + content type bazlı template çözümleme eklendi (`prompt_templates`)
+  - Guardrail eklendi: duplicate satır temizleme, CTA spam sınırlama, mutlak iddia yumuşatma
+  - OpenRouter prompt üretimi template + style birleşimiyle güncellendi
+- `apps/api/src/modules/generation/generation.controller.ts`
+  - `draft` schema artık `reply|quote` ve opsiyonel `templateName` kabul ediyor
+  - Yeni endpointler: `GET /generation/templates/:workspaceId`, `POST /generation/templates/upsert`
+- `apps/api/src/shared/db/seed.ts`
+  - Varsayılan prompt template seed kayıtları eklendi (`tweet/thread/reply/quote`)
+- Web güncellemesi:
+  - `apps/web/components/studio/types.ts`: `ContentMode` genişletildi
+  - `apps/web/components/studio/views/generator-view.tsx`: Reply/Quote seçenekleri eklendi
+  - `apps/web/lib/api.ts`: createDraft payload ve StyleProfile tipi güncellendi
+- Testler:
+  - Yeni unit: `apps/api/tests/generation/generation.guardrails.reply_quote.unit.test.ts`
+  - Güncellenen integration: `apps/api/src/modules/generation/tests/generation.createDraftVersion.integration.test.ts`
+- Doğrulama:
+  - `pnpm db:migrate` pass
+  - `pnpm --filter @growth-os/api test:unit -- tests/generation/generation.buildGeneratedText.styleConstraints.unit.test.ts tests/generation/generation.guardrails.reply_quote.unit.test.ts` pass
+  - `pnpm --filter @growth-os/api test:integration -- src/modules/generation/tests/generation.createDraftVersion.integration.test.ts` pass
+  - `pnpm --filter @growth-os/api lint` pass
+  - `pnpm --filter @growth-os/api typecheck` pass
+  - `pnpm --filter @growth-os/web typecheck` pass
+
+## Next Plan (Analytics Visualization Gap)
+
+- [x] Analytics view'e görsel trend/karşılaştırma blokları ekle
+- [x] İlk saat ve son snapshot için özet KPI kartları ekle
+- [x] Snapshot bazlı impressions/engagement bar görselleştirmesi ekle
+- [x] Web typecheck ile doğrula
+
+### Analytics UI Progress
+
+- `apps/web/components/studio/views/analytics-view.tsx`
+  - Ham metrik listesi yerine KPI + bar görselleştirme tabanlı görünüm eklendi
+  - `t15/t60/t24` etiketleri kısa formatta gösteriliyor
+  - Quotes metriği görünümü eklendi
+- Doğrulama:
+  - `pnpm --filter @growth-os/web typecheck` pass
+
+## Next Plan (Billing/Metering Gap)
+
+- [x] Billing servisi ekle: plan limitleri + aylık kullanım hesaplama
+- [x] Generation draft akışına metering enforcement bağla
+- [x] Billing metering endpointlerini ekle
+- [x] Studio Settings görünümüne metering paneli bağla
+- [x] Unit/integration testler ile limit davranışını doğrula
+- [x] API/Web lint + typecheck + ilgili testleri çalıştır
+
+### Billing Gap Progress
+
+- `apps/api/src/modules/billing/billing.service.ts`
+  - Plan bazlı aylık generation limitleri eklendi (`mvp0/free/creator/growth/team`)
+  - Aylık kullanım hesaplama ve 429 limit enforcement eklendi
+- `apps/api/src/modules/billing/billing.controller.ts`
+  - `GET /billing/metering/:workspaceId` endpointi eklendi
+- `apps/api/src/modules/generation/generation.service.ts`
+  - Draft üretim transaction'ına metering enforcement bağlandı
+- `apps/api/src/modules/billing/tests/billing.meteringAndLimit.integration.test.ts`
+  - Free plan limit dolu durumda bloklama ve mvp0 sınırsız davranışı doğrulandı
+- `apps/web/components/studio/views/settings-view.tsx`
+  - Plan/kullanım paneli + `Load Metering` akışı eklendi
+- `apps/web/components/studio/use-studio-controller.ts` + `apps/web/lib/api.ts`
+  - Billing metering API entegrasyonu ve state eklendi
+
+## Next Plan (First-Hour Alerting Gap)
+
+- [x] Analytics servisinde first-hour alert hesaplama ekle
+- [x] First-hour alert endpointini ekle
+- [x] Analytics integration testine alert senaryolarını ekle
+- [x] Studio Analytics görünümüne alert panelini bağla
+- [x] API/Web doğrulamalarını çalıştır
+
+### First-Hour Alert Progress
+
+- `apps/api/src/modules/analytics/analytics.service.ts`
+  - `getFirstHourAlertForContent` eklendi (ok/watch/critical sınıflandırma + nedenler)
+- `apps/api/src/modules/analytics/analytics.controller.ts`
+  - `GET /analytics/content/:workspaceId/:contentId/first-hour-alert` endpointi eklendi
+- `apps/api/src/modules/analytics/tests/analytics.getSnapshots.integration.test.ts`
+  - İyi performans (`ok`) ve kötüleşen metrik (`critical`) senaryoları eklendi
+- `apps/web/lib/api.ts`
+  - `getFirstHourAlert` ve response tipi eklendi
+- `apps/web/components/studio/use-studio-controller.ts`
+  - `firstHourAlert` state + `handleLoadFirstHourAlert` eklendi
+- `apps/web/components/studio/views/analytics-view.tsx`
+  - First-hour alert kartı ve aksiyon butonu eklendi
+
+## Next Plan (PR Review Threads Closure)
+
+- [x] Açık PR review thread listesini çıkar ve tekrar edenleri grupla
+- [x] Kritik/aksiyon gerektiren yorumları kodda düzelt (`runtime-policy`, `session guard`, `auth map`, `smtp`, `queue`, `similarity`, `generation template`)
+- [x] İlgili regresyon testlerini ekle/güncelle
+- [x] Lint + typecheck + unit/integration doğrulamalarını çalıştır
+- [x] Tek commit + thread reply/resolve adımını tamamla
+
+### PR Review Closure Progress
+
+- `apps/worker/src/runtime-policy.ts`: `real` mode desteklendi, production’da sadece `mock` engeli bırakıldı.
+- `apps/worker/tests/runtime-policy.test.ts`: production `real` mode pozitif testi eklendi.
+- `apps/api/src/shared/auth/session-auth.guard.ts`: aynı request içindeki tüm scoped resource ID’ler için workspace tutarlılığı zorunlu hale getirildi.
+- `apps/api/src/modules/auth/tests/auth.sessionGuard.workspaceIsolation.integration.test.ts`: çapraz-workspace resource kombinasyonuna `Forbidden` regresyon testi eklendi.
+- `apps/api/src/modules/auth/auth.controller.ts`: Better Auth status mapping 1xx/2xx durumlarında 500’e normalize edildi.
+- `apps/api/tests/auth/auth.controller.mapBetterAuthError.unit.test.ts`: status mapping davranışı için unit test eklendi.
+- `apps/api/src/modules/auth/better-auth.ts`: SMTP fallback portu `.env.example` ile uyumlu olacak şekilde 587’ye çekildi.
+- `apps/api/src/modules/generation/generation.service.ts`: `toPromptTemplate` içindeki dead override kaldırıldı, DB satır alanları doğrudan kullanıldı.
+- `apps/api/src/modules/scheduling/queue.ts`: queue close ve Redis quit sıralı hale getirildi.
+- `packages/shared/src/scheduling/similarity.ts`: boş token-union durumunda similarity 0 olacak şekilde düzeltildi.
+- `apps/api/tests/scheduling/similarity.cosine.threshold.unit.test.ts`: kısa/boş token vakası için regresyon assertion eklendi.
+- Doğrulama:
+  - `pnpm --filter @growth-os/worker test` pass
+  - `pnpm --filter @growth-os/api test:unit` pass
+  - `pnpm --filter @growth-os/api exec tsx --test src/modules/auth/tests/auth.sessionGuard.workspaceIsolation.integration.test.ts` pass
+  - `pnpm lint` pass
+  - `pnpm --filter @growth-os/api typecheck` pass
+  - `pnpm --filter @growth-os/worker typecheck` pass
+  - `pnpm --filter @growth-os/shared typecheck` pass
+- Ek review fixleri (açık thread seti):
+  - `apps/api/src/modules/generation/generation.service.ts`
+    - LLM çağrısı öncesi non-locking metering precheck eklendi (`preflightGenerationLimit`).
+    - Mutlak iddia regex’i `100%` senaryosunu kapsayacak şekilde düzeltildi.
+  - `apps/api/src/modules/generation/tests/generation.createDraft.limitPrecheck.integration.test.ts`
+    - Limit doluyken OpenRouter `fetch` çağrısının hiç tetiklenmediğini doğrulayan regresyon testi eklendi.
+  - `apps/api/src/modules/analytics/analytics.service.ts`
+    - `critical` seviyede bile `low_engagement_rate` reason bilgisinin korunması sağlandı.
+  - `apps/api/src/modules/analytics/tests/analytics.getSnapshots.integration.test.ts`
+    - Degrade senaryosunda hem `critical_impressions` hem `low_engagement_rate` assertion’ı eklendi.
+  - `apps/worker/src/main.ts`
+    - `PUBLISH_MAX_ATTEMPTS` parse işlemi `envInt` helper’ına taşındı (`NaN` fallback güvenliği).
+  - `apps/api/src/modules/auth/auth.controller.ts` + `apps/web/lib/api.ts`
+    - Verify akışında HTML redirect fallback’i navigation sinyaliyle sınırlandı.
+    - Web verify isteğine `Accept: application/json` eklendi.
+  - `apps/api/tests/auth/auth.requestAcceptsHtml.behavior.unit.test.ts`
+    - Navigation vs programmatic fetch ayrımı için unit test eklendi.
+- Bu tur doğrulama:
+  - `pnpm lint` pass
+  - `pnpm --filter @growth-os/api test:unit` pass
+  - `pnpm --filter @growth-os/api test:integration` pass
+
+## Next Plan (PR Review Closure Round 2)
+
+- [x] Açık thread listesini yeniden doğrula (`scripts/check-pr-review-threads.mjs`)
+- [x] Güvenlik/CI odaklı aksiyon yorumlarını kodda düzelt:
+  - worker similarity env parse fallback
+  - session token lookup candidate daraltma
+  - staging deploy condition düzeltmesi
+  - analytics UUID param validation
+  - auth SameSite configurability
+- [x] İlgili unit testleri ekle/güncelle (worker env, analytics uuid, auth cookie, session token lookup)
+- [x] Lint + typecheck + unit/integration doğrulamalarını çalıştır
+- [ ] Tüm düzeltmeleri tek commit olarak gönder
+- [ ] Her açık review thread’ine kısa not bırak ve resolve et
+
+### Round 2 Progress
+
+- `apps/worker/src/env.ts` eklendi; `SAFE_MODE_MAX_SIMILARITY` parse güvenliği `envFloat` ile merkezi hale getirildi.
+- `apps/worker/src/main.ts` similarity threshold parse işlemi `envFloat("SAFE_MODE_MAX_SIMILARITY", 0.85, 0, 1)` ile güvenli fallback’e taşındı.
+- `apps/worker/tests/env.test.ts` eklendi; empty/invalid/out-of-range env senaryoları doğrulandı.
+- `apps/api/src/shared/auth/session-auth.guard.ts` lookup candidate listesi raw token ile sınırlandı.
+- `apps/api/tests/auth/session-token-lookup-candidates.test.ts` yeni davranışa göre güncellendi.
+- `apps/api/src/modules/analytics/analytics.controller.ts` UUID param validation eklendi (`requireUuidParam`).
+- `apps/api/tests/analytics/analytics.controller.uuid_params.unit.test.ts` eklendi.
+- `apps/api/src/modules/auth/auth.controller.ts` + `apps/api/src/modules/auth/better-auth.ts` için `AUTH_COOKIE_SAME_SITE` desteği eklendi.
+- `apps/api/tests/auth/auth-cookie-secure.test.ts` same-site davranış testleri genişletildi.
+- `.github/workflows/ci.yml` staging deploy/smoke koşulları yalnız `develop` branch’e indirildi.
+- `apps/api/src/modules/scheduling/queue.ts`, `apps/api/src/modules/x_integration/x-client.ts`, `apps/api/src/modules/generation/generation.service.ts` dosyalarına ilgili review notlarını açıklayan kısa yorumlar eklendi.
+- Bu tur doğrulama:
+  - `pnpm lint` pass
+  - `pnpm typecheck` pass
+  - `pnpm --filter @growth-os/worker test` pass
+  - `pnpm --filter @growth-os/api test:unit` pass
+  - `pnpm --filter @growth-os/api test:integration` pass
+  - `pnpm --filter @growth-os/worker test` pass
+  - `pnpm typecheck` pass
+
+## Next Plan (Security Audit Remediation: Nest/Fastify/Nodemailer Upgrade)
+
+- [x] CI `dependency_audit` ve `typecheck` fail nedenlerini netleştir
+- [x] `apps/api` bağımlılıklarını Nest 11 + Fastify 5 + Nodemailer 7 seviyesine yükselt
+- [x] Fastify 5 uyumu için redirect ve CORS method ayarlarını güncelle
+- [x] Eksik billing modülü ve bağlı analytics/web değişikliklerini projeye dahil et
+- [x] Tam kalite kapısını (`quality:gate:push`) lokal bypass olmadan çalıştır
+
+### Security Upgrade Progress
+
+- `apps/api/package.json`
+  - `@nestjs/common/core/platform-fastify` -> `11.1.14`
+  - `fastify` -> `5.7.4`
+  - `@fastify/cors` -> `11.2.0`
+  - `nodemailer` -> `7.0.11`
+  - `@types/nodemailer` -> `7.0.11`
+- `apps/api/src/modules/auth/auth.controller.ts`
+  - Fastify 5 redirect imzasına uyum için `response.redirect(url, statusCode)` formatına geçildi.
+- `apps/api/src/main.ts`
+  - CORS config'e `methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"]` eklendi.
+- `apps/api/src/modules/billing/*` + `apps/api/src/app.module.ts`
+  - Billing service/controller/test eklendi ve module provider/controller listesine bağlandı.
+- `apps/api/src/modules/analytics/*` + `apps/web/*`
+  - First-hour alert + metering UI/API bağlantıları projeye dahil edildi.
+- `pnpm-lock.yaml`
+  - Yükseltilen paketler için lockfile güncellendi.
+
+### Validation (No Bypass)
+
+- `pnpm audit --prod --audit-level high` -> pass (`No known vulnerabilities found`)
+- `pnpm format:check` -> pass
+- `pnpm lint` -> pass
+- `pnpm typecheck` -> pass
+- `pnpm test:unit` -> pass
+- `pnpm test:integration` -> pass
+- `pnpm --filter @growth-os/api build` -> pass
+- `pnpm --filter @growth-os/worker build` -> pass
+- `pnpm quality:gate:push` -> pass
+
+## Next Plan (PR Review Closure Round 3)
+
+- [x] Açık review thread listesini tekrar çıkar (`scripts/check-pr-review-threads.mjs`)
+- [x] Aksiyon gerektiren yorumları kodda düzelt:
+  - `publishNow` implicit dedupe anahtarı
+  - E2E mock API cookie adı prod ile hizalama
+  - token-vault payload parse strictliği
+  - `.env.example` için same-origin API base varsayılanı
+- [x] İlgili testleri ekle/güncelle:
+  - shared token-vault edge case unit
+  - scheduling publishNow implicit dedupe integration
+- [x] Doğrulama çalıştır:
+  - `pnpm --filter @growth-os/shared test`
+  - `pnpm --filter @growth-os/api exec tsx --test src/modules/scheduling/tests/scheduling.publishNow.safeModeAndDedupe.integration.test.ts`
+  - `pnpm --filter @growth-os/web test:e2e`
+  - `pnpm lint`
+  - `pnpm typecheck`
+- [x] Tüm değişiklikleri tek commit olarak gönder
+- [x] Her açık thread’e kısa not bırak ve resolve et
+
+### Round 3 Progress
+
+- `apps/api/src/modules/scheduling/scheduling.service.ts`
+  - `publishNow` artık implicit çağrıda dakika-bucket tabanlı dedupe key üretiyor.
+- `apps/api/src/modules/scheduling/tests/scheduling.publishNow.safeModeAndDedupe.integration.test.ts`
+  - dedupeKey verilmeden art arda `publishNow` çağrısında `ConflictException` beklentisi eklendi.
+- `packages/shared/src/security/token-vault.ts`
+  - `decodeParts` için `parts.length === 3` zorunluluğu eklendi (fazla segment reject).
+- `packages/shared/tests/shared-core.test.ts`
+  - ekstra segmentli payload için `decryptSecret` reject testi eklendi.
+- `apps/web/e2e/mock-api/server.mjs`
+  - E2E mock session cookie adı `session_token` ile prod davranışına hizalandı.
+- `.env.example`
+  - `NEXT_PUBLIC_API_URL` varsayılanı `/api` yapıldı (cross-origin cookie edge-case azaltımı).
+
+## Next Plan (PR #1 Critical Review Round 4)
+
+- [x] Worker publish/metrics akışında inline mock fonksiyonları kaldır, `X_CLIENT_MODE` ile gerçek/mock client seçimine bağla.
+- [x] Generation OpenRouter fallback davranışını düzelt: `openrouter` modunda sessiz fallback yerine log + hata; fallback sadece `stub` modunda.
+- [x] `GenerationService` constructor default DI bypass (`new BillingService()`) kaldır.
+- [x] `contents.type` constraint’i migration bootstrap safhasında `reply|quote` ile hizala.
+- [x] `x-client` JSON parse hatalarında sessiz `undefined` yerine belirgin hata üret.
+- [x] Rollback/queue kapanışındaki sessiz catch bloklarına log visibility ekle.
+- [x] Auth cookie policy + UUID validation merkezileştirme ve `SessionAuthGuard` paralel scoped lookup değişikliklerini finalize et.
+- [x] Lint + typecheck + hedef testleri çalıştır, sonuçları bu dosyada review altında özetle.
+
+### Round 4 Progress
+
+- `apps/worker/src/x-client.ts` eklendi; worker publish/metrics için `mock|real` seçilebilir X client katmanı oluşturuldu.
+- `apps/worker/src/main.ts`
+  - inline `publishPost/fetchPostMetrics` mock fonksiyonları kaldırıldı.
+  - publish ve metrics akışı `getXClient()` üzerinden çalışacak şekilde bağlandı.
+  - rollback/recovery catch bloklarına yapılandırılmış `warn/error` logları eklendi.
+- `apps/worker/tests/x-client.test.ts` eklendi; mode cache, invalid JSON ve retry davranışları testlendi.
+- `apps/api/src/modules/generation/generation.service.ts`
+  - OpenRouter çağrısında sessiz fallback kaldırıldı; `openrouter` modunda hata log + `502` döndürülüyor.
+  - fallback metin artık yalnızca `LLM_PROVIDER=stub` için aktif.
+  - `GenerationService` constructor’daki `new BillingService()` default bypass kaldırıldı.
+  - transaction rollback catch’lerine `Logger.warn` visibility eklendi.
+- `apps/api/src/modules/generation/tests/*`
+  - `GenerationService` test init’i DI uyumlu olacak şekilde `new BillingService()` ile güncellendi.
+- `packages/db/migrations/003_mvp0_core.sql`
+  - `contents.type` constraint bootstrap seviyesinde `tweet|thread|reply|quote` oldu.
+- `apps/api/src/modules/x_integration/x-client.ts`
+  - JSON parse hatası artık sessiz `undefined` değil, explicit `X_REQUEST_FAILED` hatası.
+- `apps/api/tests/x_integration/x_integration.mockXClient.publish_metrics.unit.test.ts`
+  - invalid JSON regresyon testi eklendi.
+- `apps/api/src/modules/x_integration/x-integration.service.ts`
+  - tüm rollback catch noktalarına `Logger.warn` eklendi.
+- `apps/api/src/modules/scheduling/scheduling.service.ts` + `apps/api/src/modules/scheduling/queue.ts`
+  - rollback/redis quit fallback path’lerine log visibility eklendi.
+- `apps/api/src/shared/http/origin-utils.ts`
+  - `APP_URL` boşsa production/staging ortamlarında localhost origin fallback’i kapatıldı.
+- `apps/api/src/shared/auth/cookie-policy.ts` + `apps/api/src/shared/validation/uuid.ts` eklendi; auth cookie policy ve UUID doğrulama merkezi hale getirildi.
+- `apps/api/src/modules/auth/auth.controller.ts`, `apps/api/src/modules/auth/better-auth.ts`, `apps/api/src/shared/auth/session-auth.guard.ts`
+  - cookie policy/UUID ortaklaştırma ve scoped workspace lookup paralelleştirme finalize edildi.
+- Root artifact cleanup:
+  - `XPatla Benzeri Bir Ürünü Kişisel Kullanım İçin İnşa Etme ve Ürünleştirme Ana Planı.pdf` silindi.
+  - `deep-research-report(1).md` silindi.
+- `apps/web/app/page.tsx`
+  - server-side `resolveApiBaseUrl` yalnız absolute `http(s)` URL kabul edecek şekilde düzeltildi; relative `/api` fallback kaynaklı silent auth redirect bug’ı kapatıldı.
+- PR thread operasyonu:
+  - `apps/web/app/page.tsx:6` thread’ine fix notu yazıldı ve thread resolve edildi.
+  - `node scripts/check-pr-review-threads.mjs` -> pass (0 unresolved).
+
+### Round 4 Validation
+
+- `pnpm quality:gate:push` pass
+  - `format:check` pass
+  - `lint` pass
+  - `typecheck` pass
+  - `test:unit` pass
+  - `test:integration` pass
+  - `coverage:project` pass
+  - `test:e2e` pass
+  - `build` pass
+- Son web thread fix doğrulaması:
+  - `pnpm --filter @growth-os/web typecheck` pass
+  - `pnpm --filter @growth-os/web test:e2e` pass
+  - `pnpm lint` pass

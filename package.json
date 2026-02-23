@@ -1,0 +1,66 @@
+{
+  "name": "growth-os",
+  "private": true,
+  "packageManager": "pnpm@9.12.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev --parallel --filter=@growth-os/web --filter=@growth-os/api",
+    "worker:dev": "pnpm --filter @growth-os/worker dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:unit": "pnpm --filter @growth-os/shared test && pnpm --filter @growth-os/ui test && pnpm --filter @growth-os/api test:unit && pnpm --filter @growth-os/worker test",
+    "test:e2e": "pnpm --filter @growth-os/web test:e2e",
+    "test:integration": "pnpm --filter @growth-os/api test:integration",
+    "coverage:project": "pnpm --filter @growth-os/shared coverage && pnpm --filter @growth-os/ui coverage && pnpm --filter @growth-os/worker coverage && pnpm --filter @growth-os/api coverage:project",
+    "coverage:api": "pnpm --filter @growth-os/api coverage:project",
+    "quality:gate": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:integration && pnpm coverage:project && pnpm build",
+    "quality:gate:push": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:integration && pnpm coverage:project && pnpm test:e2e && pnpm build",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint-staged": "lint-staged",
+    "commitlint": "commitlint",
+    "branch:check": "node scripts/check-branch-name.mjs",
+    "pr:review-check": "node scripts/check-pr-review-threads.mjs",
+    "prepare": "husky || true",
+    "db:up": "docker compose up -d --remove-orphans --wait",
+    "db:down": "docker compose down",
+    "infra:up": "pnpm db:up",
+    "infra:down": "pnpm db:down",
+    "db:migrate": "pnpm --filter @growth-os/api db:migrate",
+    "db:seed": "pnpm --filter @growth-os/api db:seed",
+    "seed": "pnpm --filter @growth-os/api db:seed",
+    "dev:prepare": "pnpm db:up && pnpm db:migrate && pnpm seed",
+    "smoke:test": "node scripts/smoke-test.mjs",
+    "deploy:staging": "node scripts/deploy-hook.mjs staging",
+    "deploy:prod": "node scripts/deploy-hook.mjs production"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,mjs,cjs}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml,css}": [
+      "prettier --write"
+    ]
+  },
+  "devDependencies": {
+    "@commitlint/cli": "19.6.1",
+    "@commitlint/config-conventional": "19.6.0",
+    "@eslint/js": "9.17.0",
+    "@next/eslint-plugin-next": "16.1.6",
+    "eslint": "9.17.0",
+    "eslint-config-next": "16.1.6",
+    "globals": "15.14.0",
+    "husky": "9.1.7",
+    "lint-staged": "15.2.11",
+    "prettier": "3.4.2",
+    "turbo": "2.3.3",
+    "typescript": "5.7.3",
+    "typescript-eslint": "8.19.1"
+  }
+}

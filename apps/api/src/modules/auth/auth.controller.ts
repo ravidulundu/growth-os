@@ -1,0 +1,314 @@
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  HttpException,
+  InternalServerErrorException,
+  Logger,
+  Get,
+  Post,
+  Query,
+  Req,
+  Res
+} from "@nestjs/common";
+import { FastifyReply, FastifyRequest } from "fastify";
+import { z } from "zod";
+import { Public } from "../../shared/auth/public.decorator";
+import {
+  resolveAuthCookieSameSiteHeaderValue,
+  resolveAuthCookieSecure
+} from "../../shared/auth/cookie-policy";
+import { resolveAppOrigins } from "../../shared/http/origin-utils";
+import { getBetterAuth } from "./better-auth";
+import { buildMagicLinkRequestResponse } from "./auth-response";
+
+const requestSchema = z.object({
+  email: z.string().email(),
+  name: z.string().min(1).optional(),
+  callbackURL: z.string().url().optional(),
+  newUserCallbackURL: z.string().url().optional(),
+  errorCallbackURL: z.string().url().optional()
+});
+
+const verifySchema = z.object({
+  token: z.string().min(16),
+  callbackURL: z.string().url().optional(),
+  newUserCallbackURL: z.string().url().optional(),
+  errorCallbackURL: z.string().url().optional()
+});
+
+const LOCAL_REDIRECT_ORIGINS = [
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "http://localhost:3010",
+  "http://127.0.0.1:3010"
+];
+
+export function authCookieSecure() {
+  return resolveAuthCookieSecure();
+}
+
+export function authCookieSameSite() {
+  return resolveAuthCookieSameSiteHeaderValue();
+}
+
+function toWebHeaders(headersObject: FastifyRequest["headers"]) {
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(headersObject)) {
+    if (typeof value === "string") {
+      headers.set(key, value);
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        headers.append(key, item);
+      }
+    }
+  }
+  return headers;
+}
+
+export function buildCookieValue(sessionToken: string) {
+  const cookieParts = [
+    `session_token=${encodeURIComponent(sessionToken)}`,
+    "Path=/",
+    "HttpOnly",
+    `SameSite=${authCookieSameSite()}`,
+    `Max-Age=${30 * 24 * 60 * 60}`
+  ];
+
+  if (authCookieSecure()) {
+    cookieParts.push("Secure");
+  }
+
+  return cookieParts.join("; ");
+}
+
+function deriveDisplayName(email: string, name?: string) {
+  if (name?.trim()) {
+    return name.trim();
+  }
+
+  const localPart = email.split("@")[0]?.trim();
+  return localPart && localPart.length > 0 ? localPart : "user";
+}
+
+export function resolveRedirectOrigins() {
+  const configured = process.env.CORS_ALLOWED_ORIGINS?.trim();
+  if (configured) {
+    return configured
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean);
+  }
+
+  return resolveAppOrigins(process.env.APP_URL, LOCAL_REDIRECT_ORIGINS);
+}
+
+export function resolveSafeRedirectTarget(rawTarget?: string) {
+  if (!rawTarget) {
+    return null;
+  }
+
+  const candidate = rawTarget.trim();
+  if (!candidate) {
+    return null;
+  }
+
+  const fallbackBase = process.env.APP_URL?.trim() || "http://localhost:3010";
+
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate, fallbackBase);
+  } catch {
+    return null;
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return null;
+  }
+
+  const allowedOrigins = new Set(
+    resolveRedirectOrigins()
+      .map((origin) => {
+        try {
+          return new URL(origin).origin;
+        } catch {
+          Logger.warn(
+            `Ignoring malformed redirect origin in allowlist: ${origin}`,
+            "AuthController"
+          );
+          return null;
+        }
+      })
+      .filter((origin): origin is string => Boolean(origin))
+  );
+
+  return allowedOrigins.has(parsed.origin) ? parsed.toString() : null;
+}
+
+function headerAsString(value: string | string[] | undefined) {
+  if (typeof value === "string") {
+    return value.toLowerCase();
+  }
+  if (Array.isArray(value)) {
+    return value.join(",").toLowerCase();
+  }
+  return "";
+}
+
+export function requestAcceptsHtml(request: FastifyRequest) {
+  const accept = headerAsString(request.headers.accept);
+  if (!accept.includes("text/html")) {
+    return false;
+  }
+
+  const fetchMode = headerAsString(request.headers["sec-fetch-mode"]);
+  const fetchDest = headerAsString(request.headers["sec-fetch-dest"]);
+
+  // Sec-Fetch-* headers are set by modern browsers; older clients or custom HTTP
+  // libraries may omit them entirely. When absent, fall back to Accept header alone.
+  if (!fetchMode && !fetchDest) {
+    return true;
+  }
+
+  return fetchMode === "navigate" || fetchDest === "document" || fetchDest === "iframe";
+}
+
+export function mapBetterAuthError(error: unknown): HttpException {
+  if (error instanceof HttpException) {
+    return error;
+  }
+
+  if (typeof error !== "object" || !error) {
+    return new InternalServerErrorException("Authentication request failed");
+  }
+
+  const maybeStatusCode = (error as { statusCode?: unknown }).statusCode;
+  const rawStatusCode = typeof maybeStatusCode === "number" ? maybeStatusCode : undefined;
+  const statusCode =
+    rawStatusCode === undefined
+      ? 500
+      : rawStatusCode >= 300 && rawStatusCode < 400
+        ? 401
+        : rawStatusCode >= 400 && rawStatusCode < 600
+          ? rawStatusCode
+          : 500;
+
+  const maybeBodyMessage = (error as { body?: { message?: unknown } }).body?.message;
+  const maybeMessage = (error as { message?: unknown }).message;
+  const message =
+    (typeof maybeBodyMessage === "string" && maybeBodyMessage.trim()) ||
+    (typeof maybeMessage === "string" && maybeMessage.trim()) ||
+    "Authentication request failed";
+
+  if (statusCode === 401 && message === "Authentication request failed") {
+    return new HttpException("Invalid or expired magic link token", statusCode);
+  }
+
+  if (statusCode === 500) {
+    return new InternalServerErrorException(message);
+  }
+
+  return new HttpException(message, statusCode);
+}
+
+@Controller("auth")
+@Public()
+export class AuthController {
+  @Post("sign-in/magic-link")
+  async requestMagicLink(@Body() body: unknown, @Req() request: FastifyRequest) {
+    const parsed = requestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+
+    return this.requestMagicLinkWithBetterAuth(parsed.data, request);
+  }
+
+  @Get("magic-link/verify")
+  async verifyMagicLink(
+    @Query() query: unknown,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) response: FastifyReply
+  ) {
+    const parsed = verifySchema.safeParse(query);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+
+    return this.verifyMagicLinkWithBetterAuth(parsed.data, request, response);
+  }
+
+  private async requestMagicLinkWithBetterAuth(
+    payload: z.infer<typeof requestSchema>,
+    request: FastifyRequest
+  ) {
+    try {
+      const auth = await getBetterAuth();
+      await auth.api.signInMagicLink({
+        body: {
+          ...payload,
+          email: payload.email.toLowerCase().trim(),
+          name: deriveDisplayName(payload.email, payload.name)
+        },
+        headers: toWebHeaders(request.headers)
+      });
+    } catch (error) {
+      const mapped = mapBetterAuthError(error);
+      Logger.warn(
+        `Magic link request failed (${mapped.getStatus()}): ${mapped.message}`,
+        "AuthController"
+      );
+      // Anti-enumeration: rate-limited requests return the same generic success response
+      // so attackers cannot distinguish rate-limited emails from non-existent ones.
+      if (mapped.getStatus() === 429) {
+        return buildMagicLinkRequestResponse();
+      }
+      throw mapped;
+    }
+
+    return buildMagicLinkRequestResponse();
+  }
+
+  private async verifyMagicLinkWithBetterAuth(
+    payload: z.infer<typeof verifySchema>,
+    request: FastifyRequest,
+    response: FastifyReply
+  ) {
+    let result: { token: string; user: { id: string } };
+    try {
+      const auth = await getBetterAuth();
+      result = await auth.api.magicLinkVerify({
+        query: payload,
+        headers: toWebHeaders(request.headers)
+      });
+    } catch (error) {
+      throw mapBetterAuthError(error);
+    }
+
+    response.header("Set-Cookie", buildCookieValue(result.token));
+
+    const redirectTarget = resolveSafeRedirectTarget(
+      payload.callbackURL ?? payload.newUserCallbackURL
+    );
+    if (redirectTarget) {
+      response.redirect(redirectTarget, 302);
+      return;
+    }
+
+    if (requestAcceptsHtml(request)) {
+      const appFallback = resolveSafeRedirectTarget(process.env.APP_URL);
+      if (appFallback) {
+        response.redirect(appFallback, 302);
+        return;
+      }
+    }
+
+    return {
+      ok: true,
+      userId: result.user.id
+    };
+  }
+}

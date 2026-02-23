@@ -1,0 +1,360 @@
+name: CI/CD
+
+on:
+  push:
+    branches: ["main", "develop"]
+    tags: ["v*"]
+  pull_request:
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guardrails:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Branch Name Check
+        env:
+          BRANCH_NAME: ${{ github.head_ref }}
+        run: pnpm branch:check
+
+      - name: Commit Convention Check
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          git fetch origin "${BASE_REF}:${BASE_REF}"
+          pnpm commitlint --from "origin/${BASE_REF}" --to "${HEAD_SHA}" --verbose
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Format Check
+        run: pnpm format:check
+      - name: Lint
+        run: pnpm lint
+
+  typecheck:
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Type Check
+        run: pnpm typecheck
+
+  unit_tests:
+    runs-on: ubuntu-latest
+    needs: [typecheck]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Unit Tests
+        run: pnpm test:unit
+
+  integration_tests:
+    runs-on: ubuntu-latest
+    needs: [unit_tests]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: growth_os
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d growth_os"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 56379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://postgres@localhost:55432/growth_os
+      REDIS_URL: redis://localhost:56379
+      NODE_ENV: test
+      TOKEN_ENCRYPTION_KEY: ci-dev-key
+      BETTER_AUTH_SECRET: ci-better-auth-secret-please-change
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Migrate DB
+        run: pnpm db:migrate
+      - name: Integration Tests
+        run: pnpm test:integration
+      - name: Auth Endpoint Contract Smoke (legacy off + Better Auth on)
+        env:
+          SMOKE_BASE_URL: http://localhost:4000
+          APP_URL: http://localhost:3010
+          API_URL: http://localhost:4000
+          BETTER_AUTH_BASE_URL: http://localhost:4000
+          AUTH_DEV_LOG_MAGIC_LINK_URL: "false"
+        run: |
+          set -euo pipefail
+          pnpm --filter @growth-os/api dev >/tmp/growth-os-api-smoke.log 2>&1 &
+          api_pid=$!
+          cleanup() {
+            kill "${api_pid}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 30); do
+            if curl -fsS "http://localhost:4000/health" >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          pnpm smoke:test
+
+  web_e2e:
+    runs-on: ubuntu-latest
+    needs: [integration_tests]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright Browser
+        run: pnpm --filter @growth-os/web exec playwright install --with-deps chromium
+      - name: Web E2E Tests
+        run: pnpm test:e2e
+      - name: Upload Playwright Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [integration_tests, web_e2e]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm build
+
+  dependency_audit:
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Dependency Audit (high, prod)
+        run: pnpm audit --prod --audit-level high
+
+  deploy_staging:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    needs: [build]
+    environment:
+      name: staging
+    env:
+      DEPLOY_HOOK_URL: ${{ secrets.STAGING_DEPLOY_HOOK_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Validate staging deploy hook
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_HOOK_URL}" ]; then
+            echo "STAGING_DEPLOY_HOOK_URL is required for strict CI."
+            exit 1
+          fi
+      - name: Deploy Staging
+        run: pnpm deploy:staging
+
+  smoke_staging:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && needs.deploy_staging.result == 'success'
+    runs-on: ubuntu-latest
+    needs: [deploy_staging]
+    env:
+      SMOKE_BASE_URL: ${{ secrets.STAGING_SMOKE_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Validate staging smoke URL
+        run: |
+          set -euo pipefail
+          if [ -z "${SMOKE_BASE_URL}" ]; then
+            echo "STAGING_SMOKE_BASE_URL is required for strict CI."
+            exit 1
+          fi
+      - name: Smoke Tests (Staging)
+        run: pnpm smoke:test
+
+  verify_prod_tag:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify Tag Commit Is On Main
+        run: |
+          git fetch origin main
+          if git merge-base --is-ancestor "${GITHUB_SHA}" "origin/main"; then
+            echo "Tag commit is reachable from main."
+          else
+            echo "Tag commit is not reachable from main."
+            exit 1
+          fi
+
+  deploy_prod:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: [verify_prod_tag]
+    environment:
+      name: production
+    env:
+      DEPLOY_HOOK_URL: ${{ secrets.PRODUCTION_DEPLOY_HOOK_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Validate production deploy hook
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_HOOK_URL}" ]; then
+            echo "PRODUCTION_DEPLOY_HOOK_URL is required for strict CI."
+            exit 1
+          fi
+      - name: Deploy Production
+        run: pnpm deploy:prod
+
+  smoke_prod:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.deploy_prod.result == 'success'
+    runs-on: ubuntu-latest
+    needs: [deploy_prod]
+    env:
+      SMOKE_BASE_URL: ${{ secrets.PRODUCTION_SMOKE_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Validate production smoke URL
+        run: |
+          set -euo pipefail
+          if [ -z "${SMOKE_BASE_URL}" ]; then
+            echo "PRODUCTION_SMOKE_BASE_URL is required for strict CI."
+            exit 1
+          fi
+      - name: Smoke Tests (Production)
+        run: pnpm smoke:test

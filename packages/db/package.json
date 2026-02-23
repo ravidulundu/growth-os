@@ -1,0 +1,9 @@
+{
+  "name": "@growth-os/db",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "migrate": "echo 'Use root command: pnpm db:migrate'",
+    "seed": "echo 'Use root command: pnpm seed'"
+  }
+}

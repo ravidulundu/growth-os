@@ -1,0 +1,66 @@
+name: Security
+
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+  schedule:
+    - cron: "18 3 * * 1"
+
+permissions:
+  contents: read
+  actions: read
+  security-events: write
+
+jobs:
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["javascript-typescript"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Detect code scanning availability
+        id: code_scanning
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/code-scanning/alerts?per_page=1"
+          status="$(curl -sS -o /tmp/code_scanning_status.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${api}")"
+
+          if [ "${status}" = "200" ]; then
+            echo "enabled=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if [ "${status}" = "404" ] && jq -e '.message | contains("Code scanning is not enabled")' /tmp/code_scanning_status.json >/dev/null 2>&1; then
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          cat /tmp/code_scanning_status.json
+          echo "Unable to determine code scanning status (HTTP ${status})." >&2
+          exit 1
+      - name: Require CodeQL (code scanning must be enabled)
+        if: steps.code_scanning.outputs.enabled != 'true'
+        run: |
+          echo "Code scanning is disabled for this repository."
+          echo "Enable Code Scanning in repository settings to satisfy strict security policy."
+          exit 1
+      - name: Initialize CodeQL
+        if: steps.code_scanning.outputs.enabled == 'true'
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+      - name: Autobuild
+        if: steps.code_scanning.outputs.enabled == 'true'
+        uses: github/codeql-action/autobuild@v3
+      - name: Analyze
+        if: steps.code_scanning.outputs.enabled == 'true'
+        uses: github/codeql-action/analyze@v3
