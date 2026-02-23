@@ -328,3 +328,69 @@
   - E2E mock session cookie adı `session_token` ile prod davranışına hizalandı.
 - `.env.example`
   - `NEXT_PUBLIC_API_URL` varsayılanı `/api` yapıldı (cross-origin cookie edge-case azaltımı).
+
+## Next Plan (PR #1 Critical Review Round 4)
+
+- [x] Worker publish/metrics akışında inline mock fonksiyonları kaldır, `X_CLIENT_MODE` ile gerçek/mock client seçimine bağla.
+- [x] Generation OpenRouter fallback davranışını düzelt: `openrouter` modunda sessiz fallback yerine log + hata; fallback sadece `stub` modunda.
+- [x] `GenerationService` constructor default DI bypass (`new BillingService()`) kaldır.
+- [x] `contents.type` constraint’i migration bootstrap safhasında `reply|quote` ile hizala.
+- [x] `x-client` JSON parse hatalarında sessiz `undefined` yerine belirgin hata üret.
+- [x] Rollback/queue kapanışındaki sessiz catch bloklarına log visibility ekle.
+- [x] Auth cookie policy + UUID validation merkezileştirme ve `SessionAuthGuard` paralel scoped lookup değişikliklerini finalize et.
+- [x] Lint + typecheck + hedef testleri çalıştır, sonuçları bu dosyada review altında özetle.
+
+### Round 4 Progress
+
+- `apps/worker/src/x-client.ts` eklendi; worker publish/metrics için `mock|real` seçilebilir X client katmanı oluşturuldu.
+- `apps/worker/src/main.ts`
+  - inline `publishPost/fetchPostMetrics` mock fonksiyonları kaldırıldı.
+  - publish ve metrics akışı `getXClient()` üzerinden çalışacak şekilde bağlandı.
+  - rollback/recovery catch bloklarına yapılandırılmış `warn/error` logları eklendi.
+- `apps/worker/tests/x-client.test.ts` eklendi; mode cache, invalid JSON ve retry davranışları testlendi.
+- `apps/api/src/modules/generation/generation.service.ts`
+  - OpenRouter çağrısında sessiz fallback kaldırıldı; `openrouter` modunda hata log + `502` döndürülüyor.
+  - fallback metin artık yalnızca `LLM_PROVIDER=stub` için aktif.
+  - `GenerationService` constructor’daki `new BillingService()` default bypass kaldırıldı.
+  - transaction rollback catch’lerine `Logger.warn` visibility eklendi.
+- `apps/api/src/modules/generation/tests/*`
+  - `GenerationService` test init’i DI uyumlu olacak şekilde `new BillingService()` ile güncellendi.
+- `packages/db/migrations/003_mvp0_core.sql`
+  - `contents.type` constraint bootstrap seviyesinde `tweet|thread|reply|quote` oldu.
+- `apps/api/src/modules/x_integration/x-client.ts`
+  - JSON parse hatası artık sessiz `undefined` değil, explicit `X_REQUEST_FAILED` hatası.
+- `apps/api/tests/x_integration/x_integration.mockXClient.publish_metrics.unit.test.ts`
+  - invalid JSON regresyon testi eklendi.
+- `apps/api/src/modules/x_integration/x-integration.service.ts`
+  - tüm rollback catch noktalarına `Logger.warn` eklendi.
+- `apps/api/src/modules/scheduling/scheduling.service.ts` + `apps/api/src/modules/scheduling/queue.ts`
+  - rollback/redis quit fallback path’lerine log visibility eklendi.
+- `apps/api/src/shared/http/origin-utils.ts`
+  - `APP_URL` boşsa production/staging ortamlarında localhost origin fallback’i kapatıldı.
+- `apps/api/src/shared/auth/cookie-policy.ts` + `apps/api/src/shared/validation/uuid.ts` eklendi; auth cookie policy ve UUID doğrulama merkezi hale getirildi.
+- `apps/api/src/modules/auth/auth.controller.ts`, `apps/api/src/modules/auth/better-auth.ts`, `apps/api/src/shared/auth/session-auth.guard.ts`
+  - cookie policy/UUID ortaklaştırma ve scoped workspace lookup paralelleştirme finalize edildi.
+- Root artifact cleanup:
+  - `XPatla Benzeri Bir Ürünü Kişisel Kullanım İçin İnşa Etme ve Ürünleştirme Ana Planı.pdf` silindi.
+  - `deep-research-report(1).md` silindi.
+- `apps/web/app/page.tsx`
+  - server-side `resolveApiBaseUrl` yalnız absolute `http(s)` URL kabul edecek şekilde düzeltildi; relative `/api` fallback kaynaklı silent auth redirect bug’ı kapatıldı.
+- PR thread operasyonu:
+  - `apps/web/app/page.tsx:6` thread’ine fix notu yazıldı ve thread resolve edildi.
+  - `node scripts/check-pr-review-threads.mjs` -> pass (0 unresolved).
+
+### Round 4 Validation
+
+- `pnpm quality:gate:push` pass
+  - `format:check` pass
+  - `lint` pass
+  - `typecheck` pass
+  - `test:unit` pass
+  - `test:integration` pass
+  - `coverage:project` pass
+  - `test:e2e` pass
+  - `build` pass
+- Son web thread fix doğrulaması:
+  - `pnpm --filter @growth-os/web typecheck` pass
+  - `pnpm --filter @growth-os/web test:e2e` pass
+  - `pnpm lint` pass

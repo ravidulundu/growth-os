@@ -12,6 +12,10 @@ export function isLocalhostUrl(value: string) {
 export function resolveAppOrigins(appUrl: string | undefined, localOrigins: readonly string[]) {
   const trimmed = appUrl?.trim();
   if (!trimmed) {
+    const nodeEnv = process.env.NODE_ENV?.trim().toLowerCase();
+    if (nodeEnv === "production" || nodeEnv === "staging") {
+      return [];
+    }
     return [...localOrigins];
   }
 

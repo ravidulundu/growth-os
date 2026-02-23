@@ -3,10 +3,12 @@ import {
   ExecutionContext,
   ForbiddenException,
   Injectable,
+  Logger,
   UnauthorizedException
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { getPool } from "../db/pool";
+import { isUuid } from "../validation/uuid";
 import { IS_PUBLIC_ROUTE } from "./public.decorator";
 
 export function extractBearerToken(headerValue: string | string[] | undefined) {
@@ -115,10 +117,6 @@ function extractScopedResourceIds(request: {
   };
 }
 
-function isUuid(value: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
 type RouteAwareRequest = {
   method?: unknown;
   routerPath?: unknown;
@@ -163,6 +161,8 @@ export function buildSessionTokenLookupCandidates(token: string) {
 
 @Injectable()
 export class SessionAuthGuard implements CanActivate {
+  private readonly logger = new Logger(SessionAuthGuard.name);
+
   constructor(private readonly reflector: Reflector) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -235,68 +235,89 @@ export class SessionAuthGuard implements CanActivate {
       }
     };
 
+    const workspaceLookupPromises: Array<Promise<string | null>> = [];
+
     if (scopedResourceIds.contentId) {
       if (!isUuid(scopedResourceIds.contentId)) {
         throw new ForbiddenException("Workspace access denied");
       }
-      const contentWorkspaceResult = await pool.query<{ workspace_id: string }>(
-        `
-          SELECT workspace_id
-          FROM contents
-          WHERE id = $1
-          LIMIT 1;
-        `,
-        [scopedResourceIds.contentId]
+      workspaceLookupPromises.push(
+        pool
+          .query<{ workspace_id: string }>(
+            `
+              SELECT workspace_id
+              FROM contents
+              WHERE id = $1
+              LIMIT 1;
+            `,
+            [scopedResourceIds.contentId]
+          )
+          .then((result) => result.rows[0]?.workspace_id ?? null)
       );
-      registerScopedWorkspaceId(contentWorkspaceResult.rows[0]?.workspace_id ?? null);
     }
 
     if (scopedResourceIds.accountId) {
       if (!isUuid(scopedResourceIds.accountId)) {
         throw new ForbiddenException("Workspace access denied");
       }
-      const accountWorkspaceResult = await pool.query<{ workspace_id: string }>(
-        `
-          SELECT workspace_id
-          FROM x_accounts
-          WHERE id = $1
-          LIMIT 1;
-        `,
-        [scopedResourceIds.accountId]
+      workspaceLookupPromises.push(
+        pool
+          .query<{ workspace_id: string }>(
+            `
+              SELECT workspace_id
+              FROM x_accounts
+              WHERE id = $1
+              LIMIT 1;
+            `,
+            [scopedResourceIds.accountId]
+          )
+          .then((result) => result.rows[0]?.workspace_id ?? null)
       );
-      registerScopedWorkspaceId(accountWorkspaceResult.rows[0]?.workspace_id ?? null);
     }
 
     if (scopedResourceIds.publishJobId) {
       if (!isUuid(scopedResourceIds.publishJobId)) {
         throw new ForbiddenException("Workspace access denied");
       }
-      const publishJobWorkspaceResult = await pool.query<{ workspace_id: string }>(
-        `
-          SELECT workspace_id
-          FROM publish_jobs
-          WHERE id = $1
-          LIMIT 1;
-        `,
-        [scopedResourceIds.publishJobId]
+      workspaceLookupPromises.push(
+        pool
+          .query<{ workspace_id: string }>(
+            `
+              SELECT workspace_id
+              FROM publish_jobs
+              WHERE id = $1
+              LIMIT 1;
+            `,
+            [scopedResourceIds.publishJobId]
+          )
+          .then((result) => result.rows[0]?.workspace_id ?? null)
       );
-      registerScopedWorkspaceId(publishJobWorkspaceResult.rows[0]?.workspace_id ?? null);
     }
 
     if (scopedResourceIds.publishedPostId) {
       if (!isUuid(scopedResourceIds.publishedPostId)) {
         throw new ForbiddenException("Workspace access denied");
       }
-      const publishedWorkspaceResult = await pool.query<{ workspace_id: string }>(
-        `
-          SELECT workspace_id
-          FROM published_posts
-          WHERE id = $1
-          LIMIT 1;
-        `,
-        [scopedResourceIds.publishedPostId]
+      workspaceLookupPromises.push(
+        pool
+          .query<{ workspace_id: string }>(
+            `
+              SELECT workspace_id
+              FROM published_posts
+              WHERE id = $1
+              LIMIT 1;
+            `,
+            [scopedResourceIds.publishedPostId]
+          )
+          .then((result) => result.rows[0]?.workspace_id ?? null)
       );
-      registerScopedWorkspaceId(publishedWorkspaceResult.rows[0]?.workspace_id ?? null);
+    }
+
+    if (workspaceLookupPromises.length > 0) {
+      const resolvedWorkspaceIds = await Promise.all(workspaceLookupPromises);
+      for (const resolvedWorkspaceId of resolvedWorkspaceIds) {
+        registerScopedWorkspaceId(resolvedWorkspaceId);
+      }
     }
 
     const derivedWorkspaceId = scopedWorkspaceIds.values().next().value ?? null;
@@ -345,7 +366,11 @@ export class SessionAuthGuard implements CanActivate {
         `,
         [session.id]
       )
-      .catch(() => undefined);
+      .catch((error) => {
+        this.logger.warn(
+          `Failed to update session heartbeat for ${session.id}: ${error instanceof Error ? error.message : String(error)}`
+        );
+      });
 
     return true;
   }

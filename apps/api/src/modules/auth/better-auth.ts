@@ -1,8 +1,13 @@
 import { Logger } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
 import nodemailer from "nodemailer";
+import {
+  resolveAuthCookieSameSiteLowercase,
+  resolveAuthCookieSecure
+} from "../../shared/auth/cookie-policy";
 import { getPool } from "../../shared/db/pool";
 import { resolveAppOrigins } from "../../shared/http/origin-utils";
+import { isUuid } from "../../shared/validation/uuid";
 
 type SignInMagicLinkInput = {
   body: {
@@ -111,33 +116,8 @@ export function resolveTrustedOrigins() {
   return resolveAppOrigins(process.env.APP_URL, LOCAL_TRUSTED_ORIGINS);
 }
 
-function resolveUseSecureCookies() {
-  const explicit = process.env.AUTH_COOKIE_SECURE?.trim();
-  if (explicit) {
-    return explicit.toLowerCase() !== "false";
-  }
-
-  const nodeEnv = process.env.NODE_ENV?.trim().toLowerCase();
-  return nodeEnv === "production" || nodeEnv === "staging";
-}
-
-function resolveCookieSameSite() {
-  const explicit = process.env.AUTH_COOKIE_SAME_SITE?.trim().toLowerCase();
-  if (explicit === "lax") {
-    return "lax" as const;
-  }
-  if (explicit === "none") {
-    return resolveUseSecureCookies() ? ("none" as const) : ("lax" as const);
-  }
-  return "strict" as const;
-}
-
 function computeEmailHash(email: string) {
   return createHash("sha256").update(email.toLowerCase().trim()).digest("hex");
-}
-
-function isUuid(value: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function resolveAppUrl() {
@@ -249,7 +229,7 @@ async function createBetterAuthInstance(): Promise<BetterAuthInstance> {
     secret: resolveAuthSecret(),
     database: pool,
     trustedOrigins: resolveTrustedOrigins(),
-    useSecureCookies: resolveUseSecureCookies(),
+    useSecureCookies: resolveAuthCookieSecure(),
     user: {
       modelName: "users",
       fields: {
@@ -311,7 +291,7 @@ async function createBetterAuthInstance(): Promise<BetterAuthInstance> {
           name: "session_token",
           attributes: {
             httpOnly: true,
-            sameSite: resolveCookieSameSite(),
+            sameSite: resolveAuthCookieSameSiteLowercase(),
             path: "/"
           }
         }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { HttpException } from "@nestjs/common";
 import { closePool, getPool } from "../../../shared/db/pool";
+import { BillingService } from "../../billing/billing.service";
 import { GenerationService } from "../generation.service";
 
 test("generation.createDraft.limitPrecheck.integration", async (t) => {
@@ -19,7 +20,7 @@ test("generation.createDraft.limitPrecheck.integration", async (t) => {
   globalThis.fetch = mockedFetch;
 
   const pool = getPool();
-  const service = new GenerationService();
+  const service = new GenerationService(new BillingService());
   const suffix = `${Date.now()}-${Math.floor(Math.random() * 10_000)}`;
 
   const workspaceResult = await pool.query<{ id: string }>(

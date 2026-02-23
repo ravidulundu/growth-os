@@ -394,6 +394,28 @@ test("real x client retries transient 429 and succeeds", async () => {
   assert.equal(sleepCalls.length, 1);
 });
 
+test("real x client fails fast on invalid JSON payloads", async () => {
+  const fetchImpl: typeof fetch = async () =>
+    new Response("{invalid", {
+      status: 200,
+      headers: {
+        "content-type": "application/json"
+      }
+    });
+
+  const client = new RealXClient({
+    fetchImpl,
+    apiBaseUrl: "https://api.x.test/2",
+    oauthBaseUrl: "https://api.x.test/2/oauth2",
+    clientId: "client-id",
+    redirectUri: "https://app.example.com/callback"
+  });
+
+  await assert.rejects(() => client.getProfile("token"), {
+    message: /invalid JSON response/i
+  });
+});
+
 test("getXClient returns real client in real mode and validates env", async () => {
   await withEnv(
     {

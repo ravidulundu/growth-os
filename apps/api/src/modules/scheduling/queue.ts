@@ -1,9 +1,11 @@
 import { Queue } from "bullmq";
 import IORedis from "ioredis";
+import { Logger } from "@nestjs/common";
 
 let redisConnection: IORedis | undefined;
 let publishQueue: Queue | undefined;
 let metricsQueue: Queue | undefined;
+const logger = new Logger("SchedulingQueue");
 
 function getRedisUrl() {
   return process.env.REDIS_URL ?? "redis://localhost:56379";
@@ -53,6 +55,13 @@ export async function closeSchedulingQueues() {
   if (redisConnection) {
     const activeConnection = redisConnection;
     redisConnection = undefined;
-    await activeConnection.quit().catch(() => activeConnection.disconnect());
+    try {
+      await activeConnection.quit();
+    } catch (error) {
+      logger.warn(
+        `Redis quit failed, forcing disconnect: ${error instanceof Error ? error.message : String(error)}`
+      );
+      activeConnection.disconnect();
+    }
   }
 }

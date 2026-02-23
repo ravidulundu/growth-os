@@ -24,3 +24,11 @@
 - CI branch koşullarında staging/prod ayrımını workflow `if` bloklarında açık ve tekil tut; yanlış branch eşleşmesi sessizce yanlış deploy zinciri başlatabilir.
 - `publishNow` gibi "hemen çalıştır" uçlarında zaman-damgası bazlı dedupe varsayılanı çift tıklamayı engellemez; implicit dedupe için sabit/bucket anahtar üret.
 - E2E mock katmanında cookie adı/shape prod ile farklıysa auth regresyonları kaçabilir; mock kontratını prod cookie adıyla birebir tut.
+
+## 2026-02-23
+
+- Kritik review fixlerinde “mock stub” davranışı runtime’da kalıyorsa fonksiyon bazlı patch yetmez; mode-aware client abstraction’a taşı ve çağrı noktalarını tamamen oraya bağla.
+- Sessiz `catch {}` blokları görünürlüğü öldürür; rollback/fallback path’lerinde en azından `warn` log zorunlu olmalı.
+- DI default bypass (`new Service()` fallback) kaldırıldığında manuel instantiate eden testleri aynı turda güncellemeden işi bitmiş sayma.
+- Dış API JSON parse hatalarını `undefined` ile yutmak veri kaybı yaratır; parse hatasını explicit domain error’a map et.
+- “fix tamam” demeden önce tek komutta `quality:gate:push` çalıştırıp format/lint/typecheck/unit/integration/e2e/build zincirini birlikte doğrula.

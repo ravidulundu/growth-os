@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException
 } from "@nestjs/common";
@@ -26,6 +27,8 @@ function safeModeEnabled() {
 
 @Injectable()
 export class SchedulingService {
+  private readonly logger = new Logger(SchedulingService.name);
+
   protected dbPool() {
     return getPool();
   }
@@ -117,8 +120,10 @@ export class SchedulingService {
     } catch (error) {
       try {
         await client.query("ROLLBACK");
-      } catch {
-        // noop
+      } catch (rollbackError) {
+        this.logger.warn(
+          `Failed to rollback scheduling transaction: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
+        );
       }
 
       const message = String((error as { message?: string }).message ?? "");
@@ -211,12 +216,15 @@ export class SchedulingService {
           ]
         );
         await recoveryClient.query("COMMIT");
-      } catch {
+      } catch (recoveryError) {
         try {
           await recoveryClient.query("ROLLBACK");
-        } catch {
-          // noop
+        } catch (rollbackError) {
+          this.logger.warn(
+            `Failed to rollback scheduling enqueue recovery transaction: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
+          );
         }
+        this.logger.error("Failed to persist enqueue recovery state", recoveryError);
       } finally {
         recoveryClient.release();
       }

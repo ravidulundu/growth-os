@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import { Injectable, Logger, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
 import { getPool } from "../../shared/db/pool";
 import { decryptSecret, encryptSecret } from "../../shared/security/token-vault";
@@ -25,6 +25,8 @@ function configuredScopes() {
 
 @Injectable()
 export class XIntegrationService {
+  private readonly logger = new Logger(XIntegrationService.name);
+
   protected dbPool() {
     return getPool();
   }
@@ -121,8 +123,10 @@ export class XIntegrationService {
     } catch (error) {
       try {
         await stateClient.query("ROLLBACK");
-      } catch {
-        // noop
+      } catch (rollbackError) {
+        this.logger.warn(
+          `Failed to rollback OAuth state transaction: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
+        );
       }
       throw error;
     } finally {
@@ -196,8 +200,10 @@ export class XIntegrationService {
     } catch (error) {
       try {
         await client.query("ROLLBACK");
-      } catch {
-        // noop
+      } catch (rollbackError) {
+        this.logger.warn(
+          `Failed to rollback X connect persistence transaction: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
+        );
       }
       throw error;
     } finally {
@@ -283,8 +289,10 @@ export class XIntegrationService {
     } catch (error) {
       try {
         await client.query("ROLLBACK");
-      } catch {
-        // noop
+      } catch (rollbackError) {
+        this.logger.warn(
+          `Failed to rollback timeline ingest transaction: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
+        );
       }
       throw error;
     } finally {

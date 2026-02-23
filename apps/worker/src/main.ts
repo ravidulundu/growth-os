@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { Queue, QueueEvents, Worker } from "bullmq";
 import { config } from "dotenv";
 import {
@@ -12,6 +11,7 @@ import {
 import { Pool } from "pg";
 import { envFloat, envInt } from "./env";
 import { assertSupportedXClientMode } from "./runtime-policy";
+import { getXClient } from "./x-client";
 
 config();
 
@@ -75,19 +75,6 @@ const dbPool = new Pool({
 const publishQueue = new Queue(publishQueueName, { connection: redisConnectionOptions() });
 const metricsQueue = new Queue(metricsQueueName, { connection: redisConnectionOptions() });
 
-type XPublishResult = {
-  externalPostId: string;
-  publishedAt: Date;
-};
-
-type XPostMetrics = {
-  impressions: number;
-  likes: number;
-  replies: number;
-  reposts: number;
-  quotes: number;
-};
-
 const schedulerStates: SchedulerState[] = [
   "queued",
   "in_progress",
@@ -120,52 +107,7 @@ function decryptSecret(payload: string) {
   return decryptSecretWithKey(payload, rawKey);
 }
 
-function tokenSuffix(value: string) {
-  return createHash("sha256").update(value).digest("hex").slice(0, 10);
-}
-
-async function publishPost(accessToken: string, text: string): Promise<XPublishResult> {
-  if (text.includes("[429]")) {
-    const error = new Error("X rate limit exceeded");
-    (error as Error & { code?: string; transient?: boolean }).code = "RATE_LIMIT";
-    (error as Error & { code?: string; transient?: boolean }).transient = true;
-    throw error;
-  }
-
-  if (text.includes("[500]")) {
-    const error = new Error("Temporary X API failure");
-    (error as Error & { code?: string; transient?: boolean }).code = "X_TEMPORARY_ERROR";
-    (error as Error & { code?: string; transient?: boolean }).transient = true;
-    throw error;
-  }
-
-  if (text.includes("[PERM]")) {
-    const error = new Error("X policy reject");
-    (error as Error & { code?: string; transient?: boolean }).code = "POLICY_REJECTED";
-    (error as Error & { code?: string; transient?: boolean }).transient = false;
-    throw error;
-  }
-
-  return {
-    externalPostId: `mock_post_${tokenSuffix(`${accessToken}:${Date.now()}`)}`,
-    publishedAt: new Date()
-  };
-}
-
-async function fetchPostMetrics(
-  accessToken: string,
-  externalPostId: string
-): Promise<XPostMetrics> {
-  const seed = Number.parseInt(tokenSuffix(`${accessToken}:${externalPostId}`).slice(0, 6), 16);
-  const base = (seed % 400) + 100;
-  return {
-    impressions: base * 12,
-    likes: Math.floor(base * 0.2),
-    replies: Math.floor(base * 0.04),
-    reposts: Math.floor(base * 0.06),
-    quotes: Math.floor(base * 0.02)
-  };
-}
+const xClient = getXClient();
 
 function classifyPublishError(error: unknown) {
   const e = error as { code?: string; message?: string; transient?: boolean };
@@ -195,7 +137,7 @@ async function storeMetricsSnapshot(params: {
   windowKey: "t15" | "t60" | "t24";
   accessToken: string;
 }) {
-  const metrics = await fetchPostMetrics(params.accessToken, params.xPostId);
+  const metrics = await xClient.fetchPostMetrics(params.accessToken, params.xPostId);
 
   await dbPool.query(
     `
@@ -393,7 +335,10 @@ async function processPublishJob(publishJobId: string) {
       // before we persist published_posts. See docs/runbooks/publish-duplication-incident.md.
       await client.query("COMMIT");
 
-      const publishResult = await publishPost(accessToken, contentResult.rows[0].current_text);
+      const publishResult = await xClient.publishPost(
+        accessToken,
+        contentResult.rows[0].current_text
+      );
       await client.query("BEGIN");
       const currentJobResult = await client.query<{
         workspace_id: string;
@@ -537,8 +482,8 @@ async function processPublishJob(publishJobId: string) {
   } catch (error) {
     try {
       await client.query("ROLLBACK");
-    } catch {
-      // noop
+    } catch (rollbackError) {
+      logger.warn("failed to rollback publish transaction", { publishJobId }, rollbackError);
     }
 
     const recoveryClient = await dbPool.connect();
@@ -690,12 +635,19 @@ async function processPublishJob(publishJobId: string) {
               );
             }
             await enqueueRecoveryClient.query("COMMIT");
-          } catch {
+          } catch (enqueueRecoveryError) {
             try {
               await enqueueRecoveryClient.query("ROLLBACK");
-            } catch {
-              // noop
+            } catch (rollbackError) {
+              logger.warn(
+                "failed to rollback retry enqueue recovery transaction",
+                { publishJobId },
+                rollbackError
+              );
             }
+            logger.error("retry enqueue recovery handling failed", enqueueRecoveryError, {
+              publishJobId
+            });
           } finally {
             enqueueRecoveryClient.release();
           }
@@ -742,8 +694,12 @@ async function processPublishJob(publishJobId: string) {
       logger.error("publish error handling failed", innerError);
       try {
         await recoveryClient.query("ROLLBACK");
-      } catch {
-        // noop
+      } catch (rollbackError) {
+        logger.warn(
+          "failed to rollback publish error recovery transaction",
+          { publishJobId },
+          rollbackError
+        );
       }
       // Preserve the original publish error as BullMQ failure reason.
       throw error;

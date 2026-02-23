@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable, NotFoundException } from "@nestjs/common";
+import { HttpException, HttpStatus, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { getPool } from "../../shared/db/pool";
 import { BillingService } from "../billing/billing.service";
 import type { StyleProfile } from "../style/style.service";
@@ -327,7 +327,7 @@ async function requestOpenRouterCompletion(input: {
 }) {
   const apiKey = normalizeEnvValue(process.env.OPENROUTER_API_KEY);
   if (!apiKey) {
-    return undefined;
+    throw new Error("OPENROUTER_API_KEY is required when LLM_PROVIDER=openrouter.");
   }
 
   const headers: Record<string, string> = {
@@ -364,11 +364,27 @@ async function requestOpenRouterCompletion(input: {
   });
 
   if (!response.ok) {
-    return undefined;
+    const responseBody = await response.text();
+    const detail = responseBody.trim();
+    const detailSuffix = detail ? `: ${detail.slice(0, 300)}` : "";
+    throw new Error(`OpenRouter request failed (${response.status})${detailSuffix}`);
   }
 
-  const payload = (await response.json()) as unknown;
-  return extractOpenRouterContent(payload);
+  let payload: unknown;
+  try {
+    payload = (await response.json()) as unknown;
+  } catch (error) {
+    throw new Error("OpenRouter returned invalid JSON response", {
+      cause: error
+    });
+  }
+
+  const content = extractOpenRouterContent(payload);
+  if (!content || content.length === 0) {
+    throw new Error("OpenRouter returned empty completion payload.");
+  }
+
+  return content;
 }
 
 export function buildGeneratedText(input: {
@@ -402,7 +418,9 @@ export function buildGeneratedText(input: {
 
 @Injectable()
 export class GenerationService {
-  constructor(private readonly billingService: BillingService = new BillingService()) {}
+  private readonly logger = new Logger(GenerationService.name);
+
+  constructor(private readonly billingService: BillingService) {}
 
   protected dbPool() {
     return getPool();
@@ -561,16 +579,19 @@ export class GenerationService {
   }) {
     const fallbackText = applyGenerationGuardrails(buildGeneratedText(input), input.type);
 
-    if (llmProvider() !== "openrouter") {
+    if (llmProvider() === "stub") {
       return fallbackText;
     }
 
-    const generatedText = await requestOpenRouterCompletion(input);
-    if (!generatedText || generatedText.length === 0) {
-      return fallbackText;
+    try {
+      const generatedText = await requestOpenRouterCompletion(input);
+      return applyGenerationGuardrails(generatedText, input.type);
+    } catch (error) {
+      this.logger.error("OpenRouter generation failed", error, {
+        contentType: input.type
+      });
+      throw new HttpException("OpenRouter generation failed", HttpStatus.BAD_GATEWAY);
     }
-
-    return applyGenerationGuardrails(generatedText, input.type);
   }
 
   async createDraft(params: {
@@ -690,8 +711,10 @@ export class GenerationService {
     } catch (error) {
       try {
         await client.query("ROLLBACK");
-      } catch {
-        // noop
+      } catch (rollbackError) {
+        this.logger.warn(
+          `Failed to rollback createDraft transaction: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
+        );
       }
       throw error;
     } finally {
@@ -759,8 +782,10 @@ export class GenerationService {
     } catch (error) {
       try {
         await client.query("ROLLBACK");
-      } catch {
-        // noop
+      } catch (rollbackError) {
+        this.logger.warn(
+          `Failed to rollback createVersion transaction: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
+        );
       }
       throw error;
     } finally {

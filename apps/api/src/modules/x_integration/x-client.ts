@@ -207,7 +207,12 @@ export class RealXClient implements XClient {
       try {
         return (await response.json()) as unknown;
       } catch {
-        return undefined;
+        const parseError = new Error(
+          `X API returned invalid JSON response (${response.status} ${response.statusText})`
+        ) as XClientError;
+        parseError.code = "X_REQUEST_FAILED";
+        parseError.transient = false;
+        throw parseError;
       }
     }
 

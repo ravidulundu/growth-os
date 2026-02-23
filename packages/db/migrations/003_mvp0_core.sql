@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS contents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   account_id UUID REFERENCES x_accounts(id) ON DELETE SET NULL,
-  type TEXT NOT NULL CHECK (type IN ('tweet', 'thread')),
+  type TEXT NOT NULL CHECK (type IN ('tweet', 'thread', 'reply', 'quote')),
   status TEXT NOT NULL CHECK (status IN ('draft', 'scheduled', 'published', 'archived')),
   topic TEXT,
   prompt_input TEXT,

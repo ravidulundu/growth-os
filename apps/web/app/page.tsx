@@ -2,10 +2,28 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { StudioApp } from "../components/studio-app";
 
+function normalizeAbsoluteHttpUrl(value: string | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return null;
+  }
+
+  return trimmed.replace(/\/+$/, "");
+}
+
 function resolveApiBaseUrl() {
-  const configured = process.env.API_URL?.trim() || process.env.NEXT_PUBLIC_API_URL?.trim();
-  if (configured) {
-    return configured.replace(/\/+$/, "");
+  const serverConfigured = normalizeAbsoluteHttpUrl(process.env.API_URL);
+  if (serverConfigured) {
+    return serverConfigured;
+  }
+
+  const publicConfigured = normalizeAbsoluteHttpUrl(process.env.NEXT_PUBLIC_API_URL);
+  if (publicConfigured) {
+    return publicConfigured;
   }
 
   return "http://localhost:4000";

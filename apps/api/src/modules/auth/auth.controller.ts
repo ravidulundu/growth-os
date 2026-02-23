@@ -14,6 +14,10 @@ import {
 import { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { Public } from "../../shared/auth/public.decorator";
+import {
+  resolveAuthCookieSameSiteHeaderValue,
+  resolveAuthCookieSecure
+} from "../../shared/auth/cookie-policy";
 import { resolveAppOrigins } from "../../shared/http/origin-utils";
 import { getBetterAuth } from "./better-auth";
 import { buildMagicLinkRequestResponse } from "./auth-response";
@@ -41,24 +45,11 @@ const LOCAL_REDIRECT_ORIGINS = [
 ];
 
 export function authCookieSecure() {
-  const explicit = process.env.AUTH_COOKIE_SECURE?.trim();
-  if (explicit) {
-    return explicit.toLowerCase() !== "false";
-  }
-
-  const nodeEnv = process.env.NODE_ENV?.trim().toLowerCase();
-  return nodeEnv === "production" || nodeEnv === "staging";
+  return resolveAuthCookieSecure();
 }
 
 export function authCookieSameSite() {
-  const explicit = process.env.AUTH_COOKIE_SAME_SITE?.trim().toLowerCase();
-  if (explicit === "lax") {
-    return "Lax";
-  }
-  if (explicit === "none") {
-    return authCookieSecure() ? "None" : "Lax";
-  }
-  return "Strict";
+  return resolveAuthCookieSameSiteHeaderValue();
 }
 
 function toWebHeaders(headersObject: FastifyRequest["headers"]) {
@@ -144,6 +135,10 @@ export function resolveSafeRedirectTarget(rawTarget?: string) {
         try {
           return new URL(origin).origin;
         } catch {
+          Logger.warn(
+            `Ignoring malformed redirect origin in allowlist: ${origin}`,
+            "AuthController"
+          );
           return null;
         }
       })
@@ -259,7 +254,7 @@ export class AuthController {
         `Magic link request failed (${mapped.getStatus()}): ${mapped.message}`,
         "AuthController"
       );
-      if (mapped.getStatus() >= 400 && mapped.getStatus() < 500) {
+      if (mapped.getStatus() === 429) {
         return buildMagicLinkRequestResponse();
       }
       throw mapped;
