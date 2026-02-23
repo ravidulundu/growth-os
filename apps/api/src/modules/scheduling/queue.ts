@@ -13,7 +13,9 @@ function getRedisUrl() {
 
 function connection() {
   if (!redisConnection) {
-    // API process only enqueues jobs; workers use separate Redis connections.
+    // API process only uses Queue producers (no Worker/QueueEvents), so sharing a single
+    // IORedis instance is safe — no blocking commands are involved. Workers run in a
+    // separate process with dedicated per-consumer connections.
     redisConnection = new IORedis(getRedisUrl(), {
       maxRetriesPerRequest: null,
       enableReadyCheck: true

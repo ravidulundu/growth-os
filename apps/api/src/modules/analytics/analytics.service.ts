@@ -131,6 +131,7 @@ export class AnalyticsService {
       firstHourSnapshot.impressions > 0 ? engagement / firstHourSnapshot.impressions : 0;
 
     const reasons: string[] = [];
+    // Alert severity can only escalate (ok → watch → critical), never downgrade.
     let level: AlertLevel = "ok";
 
     if (firstHourSnapshot.impressions < criticalImpressions) {

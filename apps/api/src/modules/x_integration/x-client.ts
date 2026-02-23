@@ -530,6 +530,8 @@ export class MockXClient implements XClient {
   }
 }
 
+// Module-level cache is safe: Node.js is single-threaded, no race conditions.
+// Mode changes require process restart (documented in getXClient).
 let cachedClient: XClient | undefined;
 let cachedMode: string | undefined;
 

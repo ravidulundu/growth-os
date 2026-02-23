@@ -41,29 +41,23 @@ assertSupportedXClientMode({ nodeEnv: process.env.NODE_ENV, mode: process.env.X_
 function redisConnectionOptions() {
   const rawUrl = getRedisUrl();
   const parsed = new URL(rawUrl);
+  const useTls = parsed.protocol === "rediss:";
+
+  // Use ioredis URL constructor for standard fields, then overlay BullMQ-required options.
+  // TLS: ioredis doesn't auto-detect rediss: protocol, so we add tls option explicitly.
   const parsedDb = parsed.pathname.replace(/^\/+/, "").split("/")[0]?.trim();
-  const explicitPort = Number(parsed.port);
-  const port = Number.isFinite(explicitPort) && explicitPort > 0 ? explicitPort : 6379;
   const db = parsedDb ? Number(parsedDb) : 0;
 
-  const options = {
+  return {
     host: parsed.hostname,
-    port,
+    port: Number(parsed.port) || 6379,
     username: parsed.username ? decodeURIComponent(parsed.username) : undefined,
     password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
     db: Number.isFinite(db) && db >= 0 ? db : 0,
     maxRetriesPerRequest: null as null,
-    enableReadyCheck: true
+    enableReadyCheck: true,
+    ...(useTls ? { tls: {} } : {})
   };
-
-  if (parsed.protocol === "rediss:") {
-    return {
-      ...options,
-      tls: {}
-    };
-  }
-
-  return options;
 }
 
 const dbPool = new Pool({
@@ -514,8 +508,18 @@ async function processPublishJob(publishJobId: string) {
         await recoveryClient.query("COMMIT");
         return;
       }
-      const processingState =
-        currentState === "in_progress" ? currentState : nextSchedulerState(currentState, "start");
+      let processingState: SchedulerState;
+      try {
+        processingState =
+          currentState === "in_progress" ? currentState : nextSchedulerState(currentState, "start");
+      } catch (stateError) {
+        logger.error(
+          `State machine error during recovery for job ${publishJobId}: unexpected state '${currentState}'`,
+          stateError
+        );
+        await recoveryClient.query("ROLLBACK");
+        throw error;
+      }
       if (classified.transient && attempt < maxAttempts) {
         const delayMs = calculateBackoffDelayMs({ attempt });
         const nextRunAt = new Date(Date.now() + delayMs);

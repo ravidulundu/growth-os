@@ -427,7 +427,8 @@ export class GenerationService {
   }
 
   protected async preflightGenerationLimit(workspaceId: string, requestedUnits = 1) {
-    // Best-effort precheck before LLM cost; authoritative limit enforcement remains transactional.
+    // Non-atomic TOCTOU precheck: avoids expensive LLM calls when quota is clearly exceeded.
+    // Authoritative enforcement happens atomically in usage_events INSERT path.
     const metering = await this.billingService.getWorkspaceMetering(workspaceId);
     if (
       metering.monthlyGenerationLimit !== null &&

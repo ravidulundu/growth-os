@@ -291,6 +291,7 @@ async function createBetterAuthInstance(): Promise<BetterAuthInstance> {
           name: "session_token",
           attributes: {
             httpOnly: true,
+            secure: resolveAuthCookieSecure(),
             sameSite: resolveAuthCookieSameSiteLowercase(),
             path: "/"
           }

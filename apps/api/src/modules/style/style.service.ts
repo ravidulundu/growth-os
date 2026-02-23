@@ -37,6 +37,8 @@ export type StyleProfile = {
   sentenceRhythm: SentenceRhythm;
 };
 
+// Module-scope regexes with /g are safe here: used only via .match()/.replace() which
+// create fresh match state per call. Do NOT use .test() or .exec() on these globals.
 const emojiPattern = /\p{Emoji_Presentation}|\p{Extended_Pictographic}/gu;
 const ctaPattern = /\b(join|try|read|check|follow|share|start|learn)\b/gi;
 const urlPattern = /https?:\/\/\S+/gi;
@@ -257,7 +259,10 @@ function detectPreferredFormat(texts: string[]): PreferredFormat {
 }
 
 function detectLanguageRegister(texts: string[]): LanguageRegister {
-  const corpus = texts.join(" ").toLocaleLowerCase("tr");
+  // Use standard toLowerCase for ASCII regex matching, then Turkish locale
+  // for Turkish-specific patterns. Turkish toLocaleLowerCase("tr") converts
+  // ASCII 'I' to 'ı' (dotless), breaking ASCII regex like /ironic/gi.
+  const corpus = texts.join(" ").toLowerCase();
   const informal = corpus.match(informalMarkerPattern)?.length ?? 0;
   const formal = corpus.match(formalMarkerPattern)?.length ?? 0;
 
@@ -273,7 +278,7 @@ function detectLanguageRegister(texts: string[]): LanguageRegister {
 }
 
 function computeHumorSarcasmScore(texts: string[]) {
-  const corpus = texts.join(" ").toLocaleLowerCase("tr");
+  const corpus = texts.join(" ").toLowerCase();
   const humor = corpus.match(humorMarkerPattern)?.length ?? 0;
   const sarcasm = corpus.match(sarcasmMarkerPattern)?.length ?? 0;
   const scale = Math.max(1, texts.length * 2);
@@ -393,7 +398,7 @@ function createDontList(profile: {
 
 function buildBrandSafetyNotes(texts: string[], ctaRatio: number) {
   const notes = new Set<string>();
-  const corpus = texts.join(" ").toLocaleLowerCase("tr");
+  const corpus = texts.join(" ").toLowerCase();
 
   if (corpus.match(riskyWordsPattern)) {
     notes.add("Yüksek riskli vaat/kelime tespit edildi; onay gerektiren içerik olarak işaretle.");

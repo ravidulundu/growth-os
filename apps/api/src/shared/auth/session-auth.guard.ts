@@ -78,6 +78,9 @@ function pickStringValue(value: unknown) {
   return null;
 }
 
+// Workspace extraction priority: params > body > query. Body parsing is available
+// for POST/PUT/PATCH routes; GET routes use params or query. Cross-resource
+// validation in canActivate enforces all scoped IDs belong to the same workspace.
 function extractWorkspaceId(request: {
   params?: Record<string, unknown>;
   body?: Record<string, unknown>;

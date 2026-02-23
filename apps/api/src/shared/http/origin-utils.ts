@@ -1,3 +1,5 @@
+import { Logger } from "@nestjs/common";
+
 const LOCALHOST_HOSTNAMES = new Set(["localhost", "127.0.0.1"]);
 
 export function isLocalhostUrl(value: string) {
@@ -14,6 +16,10 @@ export function resolveAppOrigins(appUrl: string | undefined, localOrigins: read
   if (!trimmed) {
     const nodeEnv = process.env.NODE_ENV?.trim().toLowerCase();
     if (nodeEnv === "production" || nodeEnv === "staging") {
+      Logger.warn(
+        `APP_URL is not set in ${nodeEnv} — CORS will reject all cross-origin requests. Set APP_URL to enable CORS.`,
+        "OriginUtils"
+      );
       return [];
     }
     return [...localOrigins];

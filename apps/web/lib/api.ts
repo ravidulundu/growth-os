@@ -1,3 +1,6 @@
+// In development, web (port 3000) and API (port 4000) run on the same hostname (localhost).
+// SameSite cookies work at "site" level (same registrable domain), so credentials: "include"
+// sends cookies cross-port. In production, deploy web and API under the same site domain.
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
 type ApiErrorBody = {

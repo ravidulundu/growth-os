@@ -16,6 +16,8 @@ function allowDerivedKeyFallback() {
     return false;
   }
   const mode = process.env.NODE_ENV?.trim().toLowerCase() ?? "";
+  // Only allow derived fallback in explicitly local/test environments.
+  // Production, staging, and any other named environment must use proper 32-byte keys.
   return mode === "" || mode === "development" || mode === "test" || mode === "ci";
 }
 

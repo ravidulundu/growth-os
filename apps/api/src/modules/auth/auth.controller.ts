@@ -166,6 +166,13 @@ export function requestAcceptsHtml(request: FastifyRequest) {
 
   const fetchMode = headerAsString(request.headers["sec-fetch-mode"]);
   const fetchDest = headerAsString(request.headers["sec-fetch-dest"]);
+
+  // Sec-Fetch-* headers are set by modern browsers; older clients or custom HTTP
+  // libraries may omit them entirely. When absent, fall back to Accept header alone.
+  if (!fetchMode && !fetchDest) {
+    return true;
+  }
+
   return fetchMode === "navigate" || fetchDest === "document" || fetchDest === "iframe";
 }
 
@@ -254,6 +261,8 @@ export class AuthController {
         `Magic link request failed (${mapped.getStatus()}): ${mapped.message}`,
         "AuthController"
       );
+      // Anti-enumeration: rate-limited requests return the same generic success response
+      // so attackers cannot distinguish rate-limited emails from non-existent ones.
       if (mapped.getStatus() === 429) {
         return buildMagicLinkRequestResponse();
       }
