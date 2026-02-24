@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { StudioApp } from "../components/studio-app";
+import { LandingPage } from "../components/landing/landing-page";
 
 function normalizeAbsoluteHttpUrl(value: string | undefined) {
   const trimmed = value?.trim();
@@ -40,9 +40,7 @@ async function hasValidSession() {
     const response = await fetch(`${resolveApiBaseUrl()}/auth/session`, {
       method: "GET",
       cache: "no-store",
-      headers: {
-        cookie: cookieHeader
-      }
+      headers: { cookie: cookieHeader }
     });
     return response.ok;
   } catch {
@@ -52,9 +50,9 @@ async function hasValidSession() {
 
 export default async function HomePage() {
   const sessionValid = await hasValidSession();
-  if (!sessionValid) {
-    redirect("/login");
+  if (sessionValid) {
+    redirect("/studio");
   }
 
-  return <StudioApp />;
+  return <LandingPage />;
 }

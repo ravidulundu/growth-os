@@ -1,82 +1,87 @@
 # Growth OS - Eksik Analizi (Gap Analysis)
 
-> Tarih: 2026-02-22
+> Tarih: 2026-02-23 (guncellendi)
 > Kaynak: `deep-research-report(1).md` vs mevcut codebase karsilastirmasi
-> Durum: Proje MVP-0 asamasinda; bazi cekirdek moduller calisiyor, bazi alanlar hic baslanmamis.
+> Durum: **Faz 1 (MVP-0) tamamlandi.** Proje MVP-1 asamasina gecmeye hazir.
 
 ---
 
 ## Ozet Tablo
 
-| Alan                        | Rapor Hedefi    | Mevcut Durum          | Eksik Seviyesi |
-| --------------------------- | --------------- | --------------------- | -------------- |
-| OAuth2 PKCE (X)             | MVP-0 Gun 2     | Calisiyor (mock+real) | DUSUK          |
-| Stil Cikarimi               | MVP-0 Gun 4     | Temel var             | ORTA           |
-| Tweet/Thread Uretimi        | MVP-0 Gun 5     | Temel var             | ORTA           |
-| Quote/Reply Onerileri       | MVP-0 Gun 5     | YOK                   | YUKSEK         |
-| AI Coach Sohbet             | MVP-0+          | YOK                   | YUKSEK         |
-| Icerik Kutuphanesi          | MVP-0 Gun 5     | Temel CRUD var        | ORTA           |
-| Scheduler/Queue             | MVP-0 Gun 6     | Calisiyor             | DUSUK          |
-| Analitik Dashboard          | MVP-0 Gun 7     | Temel snapshot var    | ORTA           |
-| Gercek X Client             | MVP-0 Gun 2-7   | Sadece Mock           | YUKSEK         |
-| Rakip Analizi               | MVP-1 Gun 11-13 | YOK                   | YUKSEK         |
-| Multi-Account UI            | MVP-1 Gun 11-13 | Sema var, UI yok      | ORTA           |
-| Plan/Kredi Sistemi          | MVP-1 Gun 23-24 | YOK                   | YUKSEK         |
-| Stripe Odeme                | MVP-1 Gun 25-26 | YOK                   | YUKSEK         |
-| Landing Page + Waitlist     | MVP-1 Gun 29-30 | YOK                   | YUKSEK         |
-| Growth Loops (Referral vb.) | MVP-1           | YOK                   | YUKSEK         |
-| Prod Deployment             | MVP-1 Gun 29-30 | Sadece docker-compose | ORTA           |
+| Alan                        | Rapor Hedefi    | Mevcut Durum                                 | Eksik Seviyesi |
+| --------------------------- | --------------- | -------------------------------------------- | -------------- |
+| OAuth2 PKCE (X)             | MVP-0 Gun 2     | ✅ Calisiyor (mock+real)                     | TAMAMLANDI     |
+| Stil Cikarimi               | MVP-0 Gun 4     | ✅ Zengin (vocab, hooks, do/don't, humor)    | TAMAMLANDI     |
+| Tweet/Thread Uretimi        | MVP-0 Gun 5     | ✅ 4 tip (tweet, thread, reply, quote)       | TAMAMLANDI     |
+| Quote/Reply Onerileri       | MVP-0 Gun 5     | ⚠️ API enum var, UI akisi sinirli            | ORTA           |
+| AI Coach Sohbet             | MVP-0+          | ❌ YOK                                       | YUKSEK         |
+| Icerik Kutuphanesi          | MVP-0 Gun 5     | ✅ List/filter/detail calisiyor              | TAMAMLANDI     |
+| Scheduler/Queue             | MVP-0 Gun 6     | ✅ BullMQ + state-machine + backoff          | TAMAMLANDI     |
+| Analitik Dashboard          | MVP-0 Gun 7     | ✅ Charts (Recharts) + first-hour alert      | TAMAMLANDI     |
+| Gercek X Client             | MVP-0 Gun 2-7   | ✅ RealXClient tam implement                 | TAMAMLANDI     |
+| Takvim Gorunumu             | MVP-0           | ✅ scheduler-calendar.tsx (week/month)       | TAMAMLANDI     |
+| Ilk Saat Alerting (UI)      | MVP-0           | ✅ FirstHourAlert component var              | TAMAMLANDI     |
+| Ilk Saat Alerting (Webhook) | MVP-0           | ❌ Slack/Email webhook entegrasyonu yok      | ORTA           |
+| Rakip Analizi               | MVP-1 Gun 11-13 | ❌ YOK                                       | YUKSEK         |
+| Multi-Account UI            | MVP-1 Gun 11-13 | ⚠️ Schema + SessionAuthGuard var, UI yok     | ORTA           |
+| Plan/Kredi Sistemi          | MVP-1 Gun 23-24 | ⚠️ usage_events + plan_key var, limit yok    | YUKSEK         |
+| Stripe Odeme                | MVP-1 Gun 25-26 | ❌ YOK                                       | YUKSEK         |
+| Landing Page + Waitlist     | MVP-1 Gun 29-30 | ❌ YOK                                       | YUKSEK         |
+| Growth Loops (Referral vb.) | MVP-1           | ❌ YOK                                       | YUKSEK         |
+| Prod Deployment             | MVP-1 Gun 29-30 | ⚠️ docker-compose var, Dockerfile/Sentry yok | ORTA           |
 
 ---
 
-## 1. Stil Cikarimi (Style Extraction) - ORTA EKSIK
+## 1. Stil Cikarimi (Style Extraction) - ✅ TAMAMLANDI
 
 ### Mevcut
 
 - `POST /style/extract` calisiyor
-- Temel metrikler: avgLength, hashtagRatio, emojiRatio, ctaRatio, preferredTone
+- `StyleProfile` zengin schema: avgLength, hashtagRatio, emojiRatio, ctaRatio, preferredTone
+- **vocabulary[]** (20'ye kadar kelime/ifade) ✅
+- **humorSarcasmScore** (0-1) ✅
+- **hookPatterns[]** (10 tip: Question, Numbered, Data, Contrast, Story, Problem, Tip, Audience, Checklist, BoldClaim) ✅
+- **doList[]** + **dontList[]** (8'er madde) ✅
+- **ctaPatterns[]** ✅
+- **brandSafetyNotes[]** ✅
+- **sentenceRhythm** (short/medium/long orani) ✅
+- **languageRegister** (formal/neutral/informal) ✅
+- **writingPersonality** (2-3 cumle aciklama) ✅
+- **preferredFormat** (thread/single/mixed) ✅
+- OpenRouter LLM enrichment + stub fallback ✅
 
-### Raporda Hedeflenen Ama Eksik Olan
+### Kalan Iyilestirmeler (Dusuk Oncelik)
 
-- [ ] **Vocabulary listesi** (20+ kelime/ifade) - rapor "vocabulary" alanini sart kosuyor
-- [ ] **Humor/sarcasm seviyesi** - tone disinda ayri bir skor
-- [ ] **Hook pattern cikarimi** (en az 10 kalip + ornek) - su an yok
-- [ ] **Do/Don't listesi** (en az 8 madde) - kullanicinin "yapma" ve "yap" kaliplari
-- [ ] **CTA pattern cesitlendirme** - su an sadece oran var, kalip listesi yok
-- [ ] **Format tercihi** (thread vs single) - otomatik tespit yok
-- [ ] **Brand safety notes** - kacinilacak konular/kelimeler
-- [ ] **Cumle ritmi analizi** - kisa/uzun cumle desen tespiti
-- [ ] **Dil/argo kullanimi** - informal/formal derecelendirme
-
-### Aksiyon
-
-Style profile JSON schema genisletilmeli; LLM prompt'una bu alanlarin hepsi eklenmeli.
+- [ ] Vocabulary zenginlestirme (30+ kelimeye cikma)
+- [ ] LLM boost ile hook pattern orneklerini daha spesifik yakalama
 
 ---
 
-## 2. Icerik Uretimi (Content Generation) - ORTA EKSIK
+## 2. Icerik Uretimi (Content Generation) - ⚠️ KISMI TAMAMLANDI
 
 ### Mevcut
 
-- `POST /generation/draft` - tweet ve thread uretimi calisiyor
-- Version yonetimi var
-- OpenRouter + stub LLM entegrasyonu var
+- `POST /generation/draft` - 4 content type: tweet, thread, reply, quote ✅
+- Version yonetimi var ✅
+- OpenRouter + stub LLM entegrasyonu var ✅
+- Style profile-based prompt enhancement ✅
+- prompt_templates tablosu ✅
 
-### Raporda Hedeflenen Ama Eksik Olan
+### Hala Eksik
 
-- [ ] **Quote tweet onerisi** - viral/trending tweet'lere baglanan yanit uretimi
-- [ ] **Reply onerisi** - 5 cesit (insight, counterpoint, witty, question, resource)
+- [ ] **Quote tweet onerisi** - API'de `quote` type var ama viral tweet'e linklenme akisi yok
+- [ ] **Reply cesitleri** (insight, counterpoint, witty, question, resource) - tek tip reply var
 - [ ] **AI Coach sohbet modulu** - strateji + fikir bankasi; chat-based arayuz
-- [ ] **Format sablonlari** - Micro, Hook+Value+CTA, listicle, story gibi secenekler
-- [ ] **Hook scoring** - uretilen icerige "hook kalitesi" puani verme (XLab benzeri)
-- [ ] **Guardrail'ler** - "ayni cumleleri tekrarlama", "spammy CTA yok", "kiskirticiya/yaniltici iddiaya karsi" kontroller prompt seviyesinde
-- [ ] **Claim & credibility filtresi** - sayisal iddialar icin "kanit sor" veya "tahmini" isareti
+- [ ] **Format sablonlari** - Micro, Hook+Value+CTA, listicle, story pattern seed edilmemis
+- [ ] **Hook scoring** - uretilen icerige "hook kalitesi" puani
+- [ ] **Guardrail'ler** - tekrar cumle, spammy CTA, yaniltici iddia prompt-level kontrol
+- [ ] **Claim & credibility filtresi** - sayisal iddialar icin "kanit sor" isareti
 
-### Aksiyon
+### Aksiyon (MVP-1)
 
-- Content type enum'a `reply` ve `quote` eklenmeli
 - Format sablonlari `prompt_templates` tablosuna seed edilmeli
-- AI Coach icin ayri bir chat endpoint tasarlanmali
+- AI Coach icin ayri bir `/chat` endpoint tasarlanmali
+- Hook scoring logic eklenmeli (basit heuristik yeterli)
 
 ---
 
@@ -186,28 +191,25 @@ Style profile JSON schema genisletilmeli; LLM prompt'una bu alanlarin hepsi ekle
 
 ---
 
-## 7. Gercek X Client (Production API) - YUKSEK ONCELIK
+## 7. Gercek X Client (Production API) - ✅ TAMAMLANDI
 
 ### Mevcut
 
-- `XClient` interface tanimli
-- `MockXClient` tam calisir (test/dev)
-- OAuth PKCE flow kodu var ama gercek X API'ye bagli degil
+- `XClient` interface tanimli ✅
+- `MockXClient` tam calisir (test/dev) ✅
+- **`RealXClient` tam implementasyon:** ✅
+  - `getProfile()`, `fetchTimeline()`, `publishPost()`, `fetchPostMetrics()` ✅
+  - OAuth PKCE: `exchangeCodeForToken()`, `refreshToken()` ✅
+  - Rate limit header parsing (`x-rate-limit-reset`, `retry-after`) ✅
+  - 429 recovery: exponential backoff + configurable max retries ✅
+  - Error mapping (RATE_LIMIT, AUTH_FAILED, POLICY_REJECTED, vb.) ✅
+  - `X_CLIENT_MODE=real|mock` env ile secim ✅
 
-### Eksik
+### Kalan Eksikler (Dusuk Oncelik)
 
-- [ ] **RealXClient implementasyonu** - gercek HTTP istekleri (fetch/axios)
-- [ ] **Token refresh logic** - access token suresi doldugunda otomatik yenileme
-- [ ] **Rate limit header parsing** - `x-rate-limit-*` header'larini okuma ve proaktif yavaslatma
-- [ ] **429 recovery** - Too Many Requests durumunda backoff + retry
-- [ ] **Pagination** - timeline cekiminde cursor-based pagination (3200 post limiti)
-- [ ] **Error mapping** - X API hata kodlarini anlamli uygulama hatalarina cevirme
-- [ ] **Webhook/streaming** - (opsiyonel) gercek zamanli bildirimler
-
-### Aksiyon
-
-Bu, projenin "gercekten calisir" hale gelmesi icin EN KRITIK eksik.
-`X_CLIENT_MODE=real` icin tam implementasyon gerekli.
+- [ ] Timeline pagination (cursor-based, 3200 post limiti)
+- [ ] Servis seviyesinde otomatik token refresh middleware
+- [ ] Webhook/streaming (opsiyonel)
 
 ---
 
@@ -429,40 +431,41 @@ Landing page ve waitlist, urunlestirme oncesi ilk gorunurluk icin oncelikli.
 
 ## Oncelik Siralaması (Onerilen)
 
-### Faz 1 - MVP-0 Tamamlama (Kisisel Kullanim Icin Calisan Urun)
+### Faz 1 - MVP-0 Tamamlama ✅ BITTI
 
-1. **Gercek X Client implementasyonu** - projenin kalbi
-2. **Stil cikarimi zenginlestirme** - vocabulary, hooks, do/don't
-3. **Chart/grafik entegrasyonu** - analytics gorunurlugu
-4. **Takvim gorunumu** - scheduler UX
-5. **Ilk saat alerting** - "fast feedback loop"
+1. ~~**Gercek X Client implementasyonu**~~ ✅ TAMAMLANDI
+2. ~~**Stil cikarimi zenginlestirme**~~ ✅ TAMAMLANDI (vocabulary, hooks, do/don't, humor)
+3. ~~**Chart/grafik entegrasyonu**~~ ✅ TAMAMLANDI (Recharts)
+4. ~~**Takvim gorunumu**~~ ✅ TAMAMLANDI (scheduler-calendar.tsx)
+5. ~~**Ilk saat alerting (UI)**~~ ✅ TAMAMLANDI — webhook/email entegrasyonu eksik
 
-### Faz 2 - MVP-1 Temeli (Urunlestirmeye Hazirlik)
+### Faz 2 - MVP-1 Temeli (Urunlestirmeye Hazirlik) ← SIMDI BURADAYIZ
 
-6. **Quote/Reply onerisi** - engagement arttirici ozellik
-7. **Rakip analizi** - stratejik deger
-8. **Plan/kredi sistemi** - monetizasyon altyapisi
-9. **Stripe entegrasyonu** - odeme
-10. **Multi-account UI** - coklu hesap yonetimi
+1. **Multi-account UI** - workspace switcher + per-account style profile
+2. **Plan/kredi sistemi** - limit enforcement middleware (altyapi hazir)
+3. **Quote/Reply akisi** - viral tweet linklenme + reply cesitleri
+4. **Rakip analizi** - competitor_accounts + ingestion pipeline
+5. **Stripe entegrasyonu** - checkout + webhook + subscription sync
+6. **Ilk saat webhook alerting** - Slack/Email bildirim
 
 ### Faz 3 - Launch Hazirlik
 
-11. **Landing page + waitlist**
-12. **Production deployment** (Dockerfile, monitoring)
-13. **Security sertlestirme** (rate limiting, headers, KMS)
-14. **AI Coach** - chat-based strateji modulu
-15. **Growth loops** (referral, public analytics)
+7. **Landing page + waitlist**
+8. **Production deployment** (multi-stage Dockerfile, Sentry, PostHog)
+9. **Security sertlestirme** (API rate limiting, security headers, KMS)
+10. **AI Coach** - chat-based strateji modulu
+11. **Growth loops** (referral, public analytics profile)
 
 ---
 
-## Metrikler
+## Metrikler (2026-02-23 Guncelleme)
 
-| Metrik                          | Deger            |
-| ------------------------------- | ---------------- |
-| Toplam eksik madde              | ~85              |
-| HIC BASLANMAMIS alan            | 4                |
-| YUKSEK eksik alan               | 3                |
-| ORTA eksik alan                 | 7                |
-| DUSUK eksik alan                | 2                |
-| Tahmini MVP-0 tamamlama (Faz 1) | 5 ana is parcasi |
-| Tahmini MVP-1 tamamlama (Faz 2) | 5 ana is parcasi |
+| Metrik                  | Onceki Deger | Guncel Deger          |
+| ----------------------- | ------------ | --------------------- |
+| Toplam eksik madde      | ~85          | ~45                   |
+| HIC BASLANMAMIS alan    | 4            | 2 (Rakip, GTM)        |
+| YUKSEK eksik alan       | 3            | 3 (AI, Stripe, Rakip) |
+| ORTA eksik alan         | 7            | 4                     |
+| TAMAMLANDI              | -            | 8 alan                |
+| MVP-0 durumu            | Devam ediyor | ✅ TAMAMLANDI         |
+| MVP-1 tamamlama (Faz 2) | 5 is parcasi | 6 is parcasi          |

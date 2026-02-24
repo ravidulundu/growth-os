@@ -22,4 +22,5 @@ test("extractStyleProfile computes core style metrics", () => {
   assert.ok(profile.humorSarcasmScore >= 0 && profile.humorSarcasmScore <= 1);
   assert.ok(profile.sentenceRhythm.avgSentenceLength > 0);
   assert.ok(profile.brandSafetyNotes.length >= 2);
+  assert.equal(profile.writingPersonality, undefined);
 });

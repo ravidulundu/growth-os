@@ -1,11 +1,25 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { NotFoundException } from "@nestjs/common";
 import { closePool, getPool } from "../../../shared/db/pool";
 import { BillingService } from "../../billing/billing.service";
 import { GenerationService } from "../generation.service";
 
-test("generation.createDraftVersion.integration", async (t) => {
+type GenerationFixture = {
+  previousProvider: string | undefined;
+  previousOpenRouterKey: string | undefined;
+  pool: ReturnType<typeof getPool>;
+  service: GenerationService;
+  workspaceId: string;
+  accountId: string;
+};
+
+type DraftSeed = {
+  contentId: string;
+  text: string;
+};
+
+async function setupGenerationFixture(): Promise<GenerationFixture> {
   const previousProvider = process.env.LLM_PROVIDER;
   const previousOpenRouterKey = process.env.OPENROUTER_API_KEY;
   process.env.LLM_PROVIDER = "stub";
@@ -23,7 +37,9 @@ test("generation.createDraftVersion.integration", async (t) => {
     `,
     [`generation-it-${suffix}`]
   );
-  const workspaceId = workspaceResult.rows[0].id;
+  const workspaceRow = workspaceResult.rows[0];
+  assert.ok(workspaceRow, "workspace insert should return id");
+  const workspaceId = workspaceRow.id;
 
   const accountResult = await pool.query<{ id: string }>(
     `
@@ -33,7 +49,22 @@ test("generation.createDraftVersion.integration", async (t) => {
     `,
     [workspaceId, `generation-user-${suffix}`, `gen_${suffix}`]
   );
-  const accountId = accountResult.rows[0].id;
+  const accountRow = accountResult.rows[0];
+  assert.ok(accountRow, "account insert should return id");
+  const accountId = accountRow.id;
+
+  return {
+    previousProvider,
+    previousOpenRouterKey,
+    pool,
+    service,
+    workspaceId,
+    accountId
+  };
+}
+
+function registerGenerationCleanup(t: TestContext, fixture: GenerationFixture): void {
+  const { pool, workspaceId, previousProvider, previousOpenRouterKey } = fixture;
 
   t.after(async () => {
     await pool.query("DELETE FROM workspaces WHERE id = $1", [workspaceId]);
@@ -49,7 +80,13 @@ test("generation.createDraftVersion.integration", async (t) => {
     }
     await closePool();
   });
+}
 
+async function assertDraftCreationAndTemplates(
+  service: GenerationService,
+  workspaceId: string,
+  accountId: string
+): Promise<DraftSeed> {
   const draft = await service.createDraft({
     workspaceId,
     accountId,
@@ -98,21 +135,37 @@ test("generation.createDraftVersion.integration", async (t) => {
   assert.equal(quoteDraft.ok, true);
   assert.match(quoteDraft.text, /Quote yorumu/i);
 
-  const newVersionText = `${draft.text} Revizyon-1`;
+  return { contentId: draft.contentId, text: draft.text };
+}
+
+async function assertVersionFlow(
+  service: GenerationService,
+  workspaceId: string,
+  draftSeed: DraftSeed
+): Promise<void> {
+  const newVersionText = `${draftSeed.text} Revizyon-1`;
   const version = await service.createVersion({
     workspaceId,
-    contentId: draft.contentId,
+    contentId: draftSeed.contentId,
     textBody: newVersionText
   });
   assert.equal(version.ok, true);
   assert.equal(version.versionNo, 2);
 
-  const versions = await service.listContentVersions(workspaceId, draft.contentId);
+  const versions = await service.listContentVersions(workspaceId, draftSeed.contentId);
   assert.equal(versions.length, 2);
-  assert.equal(versions[0].version_no, 1);
-  assert.equal(versions[1].version_no, 2);
-  assert.equal(versions[1].text_body, newVersionText);
+  const [firstVersion, secondVersion] = versions;
+  assert.ok(firstVersion, "first version should exist");
+  assert.ok(secondVersion, "second version should exist");
+  assert.equal(firstVersion.version_no, 1);
+  assert.equal(secondVersion.version_no, 2);
+  assert.equal(secondVersion.text_body, newVersionText);
+}
 
+async function assertMissingVersionTargetFails(
+  service: GenerationService,
+  workspaceId: string
+): Promise<void> {
   await assert.rejects(
     () =>
       service.createVersion({
@@ -122,4 +175,17 @@ test("generation.createDraftVersion.integration", async (t) => {
       }),
     (error) => error instanceof NotFoundException
   );
+}
+
+test("generation.createDraftVersion.integration", async (t) => {
+  const fixture = await setupGenerationFixture();
+  registerGenerationCleanup(t, fixture);
+
+  const draftSeed = await assertDraftCreationAndTemplates(
+    fixture.service,
+    fixture.workspaceId,
+    fixture.accountId
+  );
+  await assertVersionFlow(fixture.service, fixture.workspaceId, draftSeed);
+  await assertMissingVersionTargetFails(fixture.service, fixture.workspaceId);
 });

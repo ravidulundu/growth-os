@@ -31,7 +31,9 @@ test("generation.createDraft.limitPrecheck.integration", async (t) => {
     `,
     [`generation-limit-it-${suffix}`]
   );
-  const workspaceId = workspaceResult.rows[0].id;
+  const workspaceRow = workspaceResult.rows[0];
+  assert.ok(workspaceRow, "workspace insert should return id");
+  const workspaceId = workspaceRow.id;
 
   const accountResult = await pool.query<{ id: string }>(
     `
@@ -41,7 +43,9 @@ test("generation.createDraft.limitPrecheck.integration", async (t) => {
     `,
     [workspaceId, `generation-limit-user-${suffix}`, `gen_limit_${suffix}`]
   );
-  const accountId = accountResult.rows[0].id;
+  const accountRow = accountResult.rows[0];
+  assert.ok(accountRow, "account insert should return id");
+  const accountId = accountRow.id;
 
   await pool.query(
     `

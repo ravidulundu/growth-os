@@ -35,6 +35,11 @@ export default [
     rules: {
       "no-console": "error",
       "@typescript-eslint/no-explicit-any": "error",
+      "max-lines-per-function": ["error", { max: 80, skipBlankLines: true, skipComments: true }],
+      "max-depth": ["error", 4],
+      "max-nested-callbacks": ["error", 3],
+      complexity: ["error", 15],
+      "max-params": ["error", 4],
       "no-restricted-imports": [
         "error",
         {

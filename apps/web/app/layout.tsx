@@ -16,7 +16,8 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    // Browser translation extensions may mutate <html> before React hydrates.
+    <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen overflow-x-hidden antialiased">
         <a className="skip-link" href="#main-content">
           Skip to main content

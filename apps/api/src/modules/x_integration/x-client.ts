@@ -20,6 +20,11 @@ export type XTimelinePost = {
   postedAt: Date;
 };
 
+export type XTimelineWithProfile = {
+  profile: XProfile;
+  posts: XTimelinePost[];
+};
+
 export type XPublishResult = {
   externalPostId: string;
   publishedAt: Date;
@@ -38,8 +43,14 @@ export interface XClient {
     code: string,
     options?: { codeVerifier?: string }
   ): Promise<XTokenExchangeResult>;
+  refreshToken(refreshToken: string): Promise<XTokenExchangeResult>;
   getProfile(accessToken: string): Promise<XProfile>;
   fetchTimeline(accessToken: string, limit: number): Promise<XTimelinePost[]>;
+  fetchTimelineByHandle(
+    accessToken: string,
+    handle: string,
+    limit: number
+  ): Promise<XTimelineWithProfile>;
   publishPost(accessToken: string, text: string): Promise<XPublishResult>;
   fetchPostMetrics(accessToken: string, externalPostId: string): Promise<XPostMetrics>;
 }
@@ -88,6 +99,10 @@ function parseScopeList(rawScopes: string | undefined) {
     .split(/\s+/)
     .map((scope) => scope.trim())
     .filter(Boolean);
+}
+
+function normalizeHandle(handle: string) {
+  return handle.trim().replace(/^@+/, "").toLowerCase();
 }
 
 function messageFromUnknownPayload(payload: unknown) {
@@ -164,6 +179,89 @@ type RealXClientOptions = {
   scopes?: string[];
 };
 
+type ResolvedRealXClientConfig = {
+  fetchImpl: typeof fetch;
+  sleepImpl: (ms: number) => Promise<void>;
+  apiBaseUrl: string;
+  oauthBaseUrl: string;
+  clientId: string;
+  clientSecret: string | undefined;
+  redirectUri: string;
+  configuredScopes: string[];
+};
+
+function defaultSleepImpl(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+function resolveOptionValue(optionValue: string | undefined, envValue: string | undefined) {
+  return optionValue ?? envValue ?? "";
+}
+
+function resolveFetchImpl(options: RealXClientOptions) {
+  return options.fetchImpl ?? fetch;
+}
+
+function resolveSleepImpl(options: RealXClientOptions) {
+  return options.sleepImpl ?? defaultSleepImpl;
+}
+
+function resolveBaseUrl(
+  optionValue: string | undefined,
+  envValue: string | undefined,
+  fallback: string
+) {
+  return normalizeBaseUrl(resolveOptionValue(optionValue, envValue), fallback);
+}
+
+function resolveClientId(options: RealXClientOptions) {
+  return resolveOptionValue(options.clientId, process.env.X_CLIENT_ID).trim();
+}
+
+function resolveClientSecret(options: RealXClientOptions) {
+  const clientSecret = resolveOptionValue(options.clientSecret, process.env.X_CLIENT_SECRET).trim();
+  return clientSecret || undefined;
+}
+
+function resolveRedirectUri(options: RealXClientOptions) {
+  return resolveOptionValue(options.redirectUri, process.env.X_REDIRECT_URI).trim();
+}
+
+function resolveConfiguredScopes(options: RealXClientOptions) {
+  return options.scopes ?? parseScopeList(process.env.X_SCOPES);
+}
+
+function resolveRealXClientConfig(options: RealXClientOptions = {}): ResolvedRealXClientConfig {
+  return {
+    fetchImpl: resolveFetchImpl(options),
+    sleepImpl: resolveSleepImpl(options),
+    apiBaseUrl: resolveBaseUrl(
+      options.apiBaseUrl,
+      process.env.X_API_BASE_URL,
+      "https://api.x.com/2"
+    ),
+    oauthBaseUrl: resolveBaseUrl(
+      options.oauthBaseUrl,
+      process.env.X_OAUTH_BASE_URL,
+      "https://api.x.com/2/oauth2"
+    ),
+    clientId: resolveClientId(options),
+    clientSecret: resolveClientSecret(options),
+    redirectUri: resolveRedirectUri(options),
+    configuredScopes: resolveConfiguredScopes(options)
+  };
+}
+
+function validateRealXClientConfig(config: ResolvedRealXClientConfig) {
+  if (!config.clientId) {
+    throw new Error("X_CLIENT_ID is required for X_CLIENT_MODE=real");
+  }
+
+  if (!config.redirectUri) {
+    throw new Error("X_REDIRECT_URI is required for X_CLIENT_MODE=real");
+  }
+}
+
 export class RealXClient implements XClient {
   private readonly fetchImpl: typeof fetch;
   private readonly sleepImpl: (ms: number) => Promise<void>;
@@ -175,30 +273,17 @@ export class RealXClient implements XClient {
   private readonly configuredScopes: string[];
 
   constructor(options: RealXClientOptions = {}) {
-    this.fetchImpl = options.fetchImpl ?? fetch;
-    this.sleepImpl =
-      options.sleepImpl ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
-    this.apiBaseUrl = normalizeBaseUrl(
-      options.apiBaseUrl ?? process.env.X_API_BASE_URL ?? "",
-      "https://api.x.com/2"
-    );
-    this.oauthBaseUrl = normalizeBaseUrl(
-      options.oauthBaseUrl ?? process.env.X_OAUTH_BASE_URL ?? "",
-      "https://api.x.com/2/oauth2"
-    );
-    this.clientId = (options.clientId ?? process.env.X_CLIENT_ID ?? "").trim();
-    this.clientSecret =
-      (options.clientSecret ?? process.env.X_CLIENT_SECRET ?? "").trim() || undefined;
-    this.redirectUri = (options.redirectUri ?? process.env.X_REDIRECT_URI ?? "").trim();
-    this.configuredScopes = options.scopes ?? parseScopeList(process.env.X_SCOPES);
+    const config = resolveRealXClientConfig(options);
+    validateRealXClientConfig(config);
 
-    if (!this.clientId) {
-      throw new Error("X_CLIENT_ID is required for X_CLIENT_MODE=real");
-    }
-
-    if (!this.redirectUri) {
-      throw new Error("X_REDIRECT_URI is required for X_CLIENT_MODE=real");
-    }
+    this.fetchImpl = config.fetchImpl;
+    this.sleepImpl = config.sleepImpl;
+    this.apiBaseUrl = config.apiBaseUrl;
+    this.oauthBaseUrl = config.oauthBaseUrl;
+    this.clientId = config.clientId;
+    this.clientSecret = config.clientSecret;
+    this.redirectUri = config.redirectUri;
+    this.configuredScopes = config.configuredScopes;
   }
 
   private async parseResponseBody(response: Response) {
@@ -333,6 +418,57 @@ export class RealXClient implements XClient {
     };
   }
 
+  async refreshToken(refreshToken: string): Promise<XTokenExchangeResult> {
+    const normalizedRefreshToken = refreshToken.trim();
+    if (!normalizedRefreshToken) {
+      throw new Error("Refresh token is required for real X client.");
+    }
+
+    const form = new URLSearchParams();
+    form.set("grant_type", "refresh_token");
+    form.set("refresh_token", normalizedRefreshToken);
+    form.set("client_id", this.clientId);
+
+    const headers = new Headers({
+      "content-type": "application/x-www-form-urlencoded"
+    });
+    if (this.clientSecret) {
+      const basic = Buffer.from(`${this.clientId}:${this.clientSecret}`, "utf8").toString("base64");
+      headers.set("authorization", `Basic ${basic}`);
+    }
+
+    const payload = await this.requestJson<{
+      access_token?: string;
+      refresh_token?: string;
+      expires_in?: number;
+      scope?: string;
+    }>(
+      `${this.oauthBaseUrl}/token`,
+      {
+        method: "POST",
+        headers,
+        body: form.toString()
+      },
+      "X token refresh failed"
+    );
+
+    if (!payload.access_token || !payload.expires_in) {
+      throw new Error("X refresh response is missing required fields.");
+    }
+
+    return {
+      accessToken: payload.access_token,
+      refreshToken: payload.refresh_token?.trim() || normalizedRefreshToken,
+      expiresInSeconds: payload.expires_in,
+      scopes: payload.scope
+        ? payload.scope
+            .split(/\s+/)
+            .map((item) => item.trim())
+            .filter(Boolean)
+        : this.configuredScopes
+    };
+  }
+
   async getProfile(accessToken: string): Promise<XProfile> {
     const payload = await this.requestJson<{
       data?: { id?: string; username?: string };
@@ -359,13 +495,12 @@ export class RealXClient implements XClient {
     };
   }
 
-  async fetchTimeline(accessToken: string, limit: number): Promise<XTimelinePost[]> {
-    const profile = await this.getProfile(accessToken);
+  private async fetchTimelineByUserId(accessToken: string, xUserId: string, limit: number) {
     const boundedLimit = Math.max(5, Math.min(limit, 100));
     const payload = await this.requestJson<{
       data?: Array<{ id?: string; text?: string; created_at?: string }>;
     }>(
-      `${this.apiBaseUrl}/users/${profile.xUserId}/tweets?max_results=${boundedLimit}&tweet.fields=created_at`,
+      `${this.apiBaseUrl}/users/${xUserId}/tweets?max_results=${boundedLimit}&tweet.fields=created_at`,
       {
         method: "GET",
         headers: {
@@ -393,6 +528,47 @@ export class RealXClient implements XClient {
         };
       })
       .filter((row): row is XTimelinePost => Boolean(row));
+  }
+
+  async fetchTimeline(accessToken: string, limit: number): Promise<XTimelinePost[]> {
+    const profile = await this.getProfile(accessToken);
+    return this.fetchTimelineByUserId(accessToken, profile.xUserId, limit);
+  }
+
+  async fetchTimelineByHandle(
+    accessToken: string,
+    handle: string,
+    limit: number
+  ): Promise<XTimelineWithProfile> {
+    const normalizedHandle = normalizeHandle(handle);
+    if (!normalizedHandle) {
+      throw new Error("Competitor handle is required.");
+    }
+
+    const profilePayload = await this.requestJson<{
+      data?: { id?: string; username?: string };
+    }>(
+      `${this.apiBaseUrl}/users/by/username/${encodeURIComponent(normalizedHandle)}?user.fields=username`,
+      {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${accessToken}`
+        }
+      },
+      "X competitor profile request failed"
+    );
+
+    const xUserId = profilePayload.data?.id?.trim();
+    const username = profilePayload.data?.username?.trim();
+    if (!xUserId || !username) {
+      throw new Error("X competitor profile response is missing required fields.");
+    }
+
+    const posts = await this.fetchTimelineByUserId(accessToken, xUserId, limit);
+    return {
+      profile: { xUserId, username },
+      posts
+    };
   }
 
   async publishPost(accessToken: string, text: string): Promise<XPublishResult> {
@@ -468,6 +644,16 @@ export class MockXClient implements XClient {
     };
   }
 
+  async refreshToken(refreshToken: string): Promise<XTokenExchangeResult> {
+    const suffix = tokenSuffix(refreshToken);
+    return {
+      accessToken: `x_access_refresh_${suffix}_${randomHex(12)}`,
+      refreshToken: `x_refresh_refresh_${suffix}_${randomHex(12)}`,
+      expiresInSeconds: 7200,
+      scopes: parseScopeList(process.env.X_SCOPES)
+    };
+  }
+
   async getProfile(accessToken: string): Promise<XProfile> {
     const suffix = tokenSuffix(accessToken);
     return {
@@ -486,6 +672,30 @@ export class MockXClient implements XClient {
       textBody,
       postedAt: new Date(Date.now() - index * 60_000)
     }));
+  }
+
+  async fetchTimelineByHandle(
+    accessToken: string,
+    handle: string,
+    limit: number
+  ): Promise<XTimelineWithProfile> {
+    const normalizedHandle = normalizeHandle(handle) || `mock_${tokenSuffix(accessToken)}`;
+    const boundedLimit = Math.max(1, Math.min(limit, 20));
+    const posts = samplePosts(normalizedHandle)
+      .slice(0, boundedLimit)
+      .map((textBody, index) => ({
+        xPostId: `mock_comp_${tokenSuffix(`${normalizedHandle}:${index + 1}`)}`,
+        textBody,
+        postedAt: new Date(Date.now() - index * 60 * 60_000)
+      }));
+
+    return {
+      profile: {
+        xUserId: `mock_competitor_${tokenSuffix(normalizedHandle)}`,
+        username: normalizedHandle
+      },
+      posts
+    };
   }
 
   async publishPost(accessToken: string, text: string): Promise<XPublishResult> {

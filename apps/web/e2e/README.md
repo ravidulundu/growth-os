@@ -10,7 +10,8 @@ Komutlar:
 
 Kapsanan kritik akislar:
 
-- Unauthorized kullanicinin `/login` sayfasina yonlendirilmesi
+- Unauthorized kullanicinin `/` landing ekranini gormesi ve CTA ile `/login` akisina gecmesi
+- Session varsa `/` uzerinden `/studio` yonlendirmesi
 - Magic-link request akisi
 - Magic-link verify ile dashboard acilisi
 - Gecersiz token hata akisi

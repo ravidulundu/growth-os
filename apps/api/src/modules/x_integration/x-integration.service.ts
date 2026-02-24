@@ -1,8 +1,16 @@
-import { Injectable, Logger, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnauthorizedException
+} from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
+import type { PoolClient } from "pg";
 import { getPool } from "../../shared/db/pool";
 import { decryptSecret, encryptSecret } from "../../shared/security/token-vault";
 import { getXClient } from "./x-client";
+import type { XPostMetrics, XProfile, XTokenExchangeResult, XTimelinePost } from "./x-client";
 
 function base64UrlSha256(input: string) {
   return createHash("sha256").update(input).digest("base64url");
@@ -21,6 +29,47 @@ function configuredScopes() {
   return (process.env.X_SCOPES ?? "tweet.read tweet.write users.read offline.access")
     .split(/\s+/)
     .filter(Boolean);
+}
+
+type CompleteConnectParams = {
+  workspaceId: string;
+  state: string;
+  code: string;
+};
+
+type CompetitorTimelinePost = XTimelinePost & {
+  metrics: XPostMetrics;
+};
+
+type CompetitorTimelineResult = {
+  handle: string;
+  xUserId: string;
+  username: string;
+  requestedLimit: number;
+  metricsCapturedCount: number;
+  posts: CompetitorTimelinePost[];
+};
+
+const competitorTimelineMinLimit = 5;
+const competitorTimelineMaxLimit = 20;
+const competitorMetricsFetchLimit = 8;
+
+function normalizeCompetitorHandle(handle: string) {
+  return handle.trim().replace(/^@+/, "").toLowerCase();
+}
+
+function boundedCompetitorTimelineLimit(limit: number) {
+  return Math.max(competitorTimelineMinLimit, Math.min(limit, competitorTimelineMaxLimit));
+}
+
+function emptyMetrics(): XPostMetrics {
+  return {
+    impressions: 0,
+    likes: 0,
+    replies: 0,
+    reposts: 0,
+    quotes: 0
+  };
 }
 
 @Injectable()
@@ -77,10 +126,22 @@ export class XIntegrationService {
     };
   }
 
-  async completeConnect(params: { workspaceId: string; state: string; code: string }) {
+  protected async rollbackTransaction(client: PoolClient, context: string) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      this.logger.warn(
+        `Failed to rollback ${context} transaction: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
+      );
+    }
+  }
+
+  protected async validateCallback(params: {
+    workspaceId: string;
+    state: string;
+  }): Promise<{ codeVerifier: string }> {
     const stateHash = base64UrlSha256(params.state);
     const stateClient = await this.dbPool().connect();
-    let codeVerifier: string;
 
     try {
       await stateClient.query("BEGIN");
@@ -103,42 +164,50 @@ export class XIntegrationService {
         [params.workspaceId, stateHash]
       );
 
-      if (!stateResult.rows[0]) {
+      const stateRow = stateResult.rows[0];
+      if (!stateRow) {
         throw new UnauthorizedException("Invalid or expired OAuth state");
       }
 
-      if (!stateResult.rows[0].code_verifier_encrypted) {
+      if (!stateRow.code_verifier_encrypted) {
         throw new UnauthorizedException("OAuth verifier missing or invalid");
       }
 
-      codeVerifier = decryptSecret(stateResult.rows[0].code_verifier_encrypted);
-      if (base64UrlSha256(codeVerifier) !== stateResult.rows[0].code_verifier_hash) {
+      const codeVerifier = decryptSecret(stateRow.code_verifier_encrypted);
+      if (base64UrlSha256(codeVerifier) !== stateRow.code_verifier_hash) {
         throw new UnauthorizedException("OAuth verifier mismatch");
       }
 
       await stateClient.query("UPDATE x_oauth_states SET consumed_at = now() WHERE id = $1", [
-        stateResult.rows[0].id
+        stateRow.id
       ]);
       await stateClient.query("COMMIT");
+      return { codeVerifier };
     } catch (error) {
-      try {
-        await stateClient.query("ROLLBACK");
-      } catch (rollbackError) {
-        this.logger.warn(
-          `Failed to rollback OAuth state transaction: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
-        );
-      }
+      await this.rollbackTransaction(stateClient, "OAuth state");
       throw error;
     } finally {
       stateClient.release();
     }
+  }
 
+  protected async exchangeToken(params: {
+    code: string;
+    codeVerifier: string;
+  }): Promise<{ token: XTokenExchangeResult; profile: XProfile }> {
     // External API calls run outside DB transaction/row lock scope.
     const token = await this.xClient().exchangeCodeForToken(params.code, {
-      codeVerifier
+      codeVerifier: params.codeVerifier
     });
     const profile = await this.xClient().getProfile(token.accessToken);
+    return { token, profile };
+  }
 
+  protected async persistConnection(params: {
+    workspaceId: string;
+    profile: XProfile;
+    token: XTokenExchangeResult;
+  }): Promise<{ accountId: string; username: string }> {
     const client = await this.dbPool().connect();
 
     try {
@@ -151,12 +220,17 @@ export class XIntegrationService {
           DO UPDATE SET username = EXCLUDED.username, is_active = true, updated_at = now()
           RETURNING id;
         `,
-        [params.workspaceId, profile.xUserId, profile.username]
+        [params.workspaceId, params.profile.xUserId, params.profile.username]
       );
+      const accountRow = accountResult.rows[0];
+      if (!accountRow) {
+        throw new NotFoundException("Failed to create X account");
+      }
+      const accountId = accountRow.id;
 
       await client.query(
         "UPDATE x_tokens SET revoked_at = now() WHERE account_id = $1 AND revoked_at IS NULL",
-        [accountResult.rows[0].id]
+        [accountId]
       );
 
       await client.query(
@@ -171,11 +245,11 @@ export class XIntegrationService {
           VALUES ($1, $2, $3, $4, $5);
         `,
         [
-          accountResult.rows[0].id,
-          encryptSecret(token.accessToken),
-          encryptSecret(token.refreshToken),
-          token.scopes,
-          new Date(Date.now() + token.expiresInSeconds * 1000)
+          accountId,
+          encryptSecret(params.token.accessToken),
+          encryptSecret(params.token.refreshToken),
+          params.token.scopes,
+          new Date(Date.now() + params.token.expiresInSeconds * 1000)
         ]
       );
 
@@ -186,29 +260,231 @@ export class XIntegrationService {
         `,
         [
           params.workspaceId,
-          accountResult.rows[0].id,
-          JSON.stringify({ username: profile.username, scopes: token.scopes })
+          accountId,
+          JSON.stringify({ username: params.profile.username, scopes: params.token.scopes })
         ]
       );
 
       await client.query("COMMIT");
       return {
-        ok: true,
-        accountId: accountResult.rows[0].id,
-        username: profile.username
+        accountId,
+        username: params.profile.username
       };
     } catch (error) {
-      try {
-        await client.query("ROLLBACK");
-      } catch (rollbackError) {
-        this.logger.warn(
-          `Failed to rollback X connect persistence transaction: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
-        );
-      }
+      await this.rollbackTransaction(client, "X connect persistence");
       throw error;
     } finally {
       client.release();
     }
+  }
+
+  protected async lockActiveTokenForRefresh(
+    client: PoolClient,
+    accountId: string,
+    workspaceId: string
+  ) {
+    const tokenResult = await client.query<{
+      id: string;
+      refresh_token_encrypted: string;
+    }>(
+      `
+        SELECT xt.id, xt.refresh_token_encrypted
+        FROM x_tokens xt
+        JOIN x_accounts xa ON xa.id = xt.account_id
+        WHERE xt.account_id = $1
+          AND xa.workspace_id = $2
+          AND xt.revoked_at IS NULL
+        ORDER BY xt.created_at DESC
+        LIMIT 1
+        FOR UPDATE;
+      `,
+      [accountId, workspaceId]
+    );
+
+    return tokenResult.rows[0];
+  }
+
+  protected async persistRefreshedToken(params: {
+    client: PoolClient;
+    accountId: string;
+    token: XTokenExchangeResult;
+  }) {
+    await params.client.query(
+      "UPDATE x_tokens SET revoked_at = now() WHERE account_id = $1 AND revoked_at IS NULL",
+      [params.accountId]
+    );
+    await params.client.query(
+      `
+        INSERT INTO x_tokens (
+          account_id,
+          access_token_encrypted,
+          refresh_token_encrypted,
+          scopes,
+          expires_at
+        )
+        VALUES ($1, $2, $3, $4, $5);
+      `,
+      [
+        params.accountId,
+        encryptSecret(params.token.accessToken),
+        encryptSecret(params.token.refreshToken),
+        params.token.scopes,
+        new Date(Date.now() + params.token.expiresInSeconds * 1000)
+      ]
+    );
+  }
+
+  async refreshAccessToken(
+    accountId: string,
+    workspaceId: string
+  ): Promise<{ accessToken: string }> {
+    const client = await this.dbPool().connect();
+    try {
+      await client.query("BEGIN");
+      const tokenRow = await this.lockActiveTokenForRefresh(client, accountId, workspaceId);
+      if (!tokenRow) {
+        throw new NotFoundException("No active X token found for account");
+      }
+
+      const refreshToken = decryptSecret(tokenRow.refresh_token_encrypted);
+      const refreshedToken = await this.xClient().refreshToken(refreshToken);
+      await this.persistRefreshedToken({
+        client,
+        accountId,
+        token: refreshedToken
+      });
+      await client.query(
+        `
+          INSERT INTO audit_logs (workspace_id, action, entity_type, entity_id, result, metadata)
+          VALUES ($1, 'x.token_refresh', 'x_account', $2, 'success', $3::jsonb);
+        `,
+        [workspaceId, accountId, JSON.stringify({ scopes: refreshedToken.scopes })]
+      );
+      await client.query("COMMIT");
+      return { accessToken: refreshedToken.accessToken };
+    } catch (error) {
+      await this.rollbackTransaction(client, "X token refresh");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async lockWorkspaceAccountForRevoke(
+    client: PoolClient,
+    workspaceId: string,
+    accountId: string
+  ) {
+    const accountResult = await client.query<{ id: string }>(
+      `
+        SELECT id
+        FROM x_accounts
+        WHERE id = $1
+          AND workspace_id = $2
+        LIMIT 1
+        FOR UPDATE;
+      `,
+      [accountId, workspaceId]
+    );
+
+    return accountResult.rows[0];
+  }
+
+  private async revokeAccountTokens(client: PoolClient, accountId: string) {
+    const revokedTokens = await client.query<{ id: string }>(
+      `
+        UPDATE x_tokens
+        SET revoked_at = now(),
+            updated_at = now()
+        WHERE account_id = $1
+          AND revoked_at IS NULL
+        RETURNING id;
+      `,
+      [accountId]
+    );
+
+    return revokedTokens.rowCount ?? revokedTokens.rows.length;
+  }
+
+  private async deactivateWorkspaceAccount(
+    client: PoolClient,
+    workspaceId: string,
+    accountId: string
+  ) {
+    const deactivatedAccount = await client.query<{ id: string }>(
+      `
+        UPDATE x_accounts
+        SET is_active = false,
+            updated_at = now()
+        WHERE id = $1
+          AND workspace_id = $2
+          AND is_active = true
+        RETURNING id;
+      `,
+      [accountId, workspaceId]
+    );
+
+    return Boolean(deactivatedAccount.rows[0]);
+  }
+
+  async revokeAccount(workspaceId: string, accountId: string) {
+    const client = await this.dbPool().connect();
+    try {
+      await client.query("BEGIN");
+      const account = await this.lockWorkspaceAccountForRevoke(client, workspaceId, accountId);
+      if (!account) {
+        throw new NotFoundException("X account not found for workspace");
+      }
+
+      const revokedTokenCount = await this.revokeAccountTokens(client, accountId);
+      const accountDeactivated = await this.deactivateWorkspaceAccount(
+        client,
+        workspaceId,
+        accountId
+      );
+      await client.query(
+        `
+          INSERT INTO audit_logs (workspace_id, action, entity_type, entity_id, result, metadata)
+          VALUES ($1, 'x.account_revoke', 'x_account', $2, 'success', $3::jsonb);
+        `,
+        [workspaceId, accountId, JSON.stringify({ revokedTokenCount, accountDeactivated })]
+      );
+      await client.query("COMMIT");
+
+      return {
+        ok: true,
+        accountId,
+        revokedTokenCount,
+        accountDeactivated
+      };
+    } catch (error) {
+      await this.rollbackTransaction(client, "X account revoke");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async completeConnect(params: CompleteConnectParams) {
+    const { codeVerifier } = await this.validateCallback({
+      workspaceId: params.workspaceId,
+      state: params.state
+    });
+    const { token, profile } = await this.exchangeToken({
+      code: params.code,
+      codeVerifier
+    });
+    const connection = await this.persistConnection({
+      workspaceId: params.workspaceId,
+      profile,
+      token
+    });
+
+    return {
+      ok: true,
+      accountId: connection.accountId,
+      username: connection.username
+    };
   }
 
   async listWorkspaceAccounts(workspaceId: string) {
@@ -232,6 +508,86 @@ export class XIntegrationService {
     return result.rows;
   }
 
+  private async resolveWorkspaceAccessToken(workspaceId: string) {
+    const tokenResult = await this.dbPool().query<{ access_token_encrypted: string }>(
+      `
+        SELECT xt.access_token_encrypted
+        FROM x_tokens xt
+        JOIN x_accounts xa ON xa.id = xt.account_id
+        WHERE xa.workspace_id = $1
+          AND xa.is_active = true
+          AND xt.revoked_at IS NULL
+        ORDER BY xt.created_at DESC
+        LIMIT 1;
+      `,
+      [workspaceId]
+    );
+
+    const tokenRow = tokenResult.rows[0];
+    if (!tokenRow) {
+      throw new NotFoundException("No active X token found for workspace");
+    }
+    return decryptSecret(tokenRow.access_token_encrypted);
+  }
+
+  private async attachCompetitorMetrics(accessToken: string, timeline: XTimelinePost[]) {
+    const metricFetchBudget = Math.min(timeline.length, competitorMetricsFetchLimit);
+    let metricsCapturedCount = 0;
+    const posts: CompetitorTimelinePost[] = [];
+
+    for (const [index, post] of timeline.entries()) {
+      if (index >= metricFetchBudget) {
+        posts.push({ ...post, metrics: emptyMetrics() });
+        continue;
+      }
+
+      try {
+        const metrics = await this.xClient().fetchPostMetrics(accessToken, post.xPostId);
+        posts.push({ ...post, metrics });
+        metricsCapturedCount += 1;
+      } catch (error) {
+        this.logger.warn(
+          `competitor metrics fetch failed for ${post.xPostId}: ${error instanceof Error ? error.message : String(error)}`
+        );
+        posts.push({ ...post, metrics: emptyMetrics() });
+      }
+    }
+
+    return {
+      posts,
+      metricsCapturedCount
+    };
+  }
+
+  async ingestCompetitorTimeline(
+    workspaceId: string,
+    handle: string,
+    limit = 12
+  ): Promise<CompetitorTimelineResult> {
+    const normalizedHandle = normalizeCompetitorHandle(handle);
+    if (!normalizedHandle) {
+      throw new BadRequestException("Competitor handle is required");
+    }
+
+    const boundedLimit = boundedCompetitorTimelineLimit(limit);
+    const accessToken = await this.resolveWorkspaceAccessToken(workspaceId);
+    const timeline = await this.xClient().fetchTimelineByHandle(
+      accessToken,
+      normalizedHandle,
+      boundedLimit
+    );
+    const metrics = await this.attachCompetitorMetrics(accessToken, timeline.posts);
+
+    return {
+      handle: normalizedHandle,
+      xUserId: timeline.profile.xUserId,
+      username: timeline.profile.username,
+      requestedLimit: boundedLimit,
+      metricsCapturedCount: metrics.metricsCapturedCount,
+      posts: metrics.posts
+    };
+  }
+
   async ingestTimeline(workspaceId: string, accountId: string, limit = 10) {
     const tokenResult = await this.dbPool().query<{ access_token_encrypted: string }>(
       `
@@ -251,7 +607,12 @@ export class XIntegrationService {
       throw new NotFoundException("No active X token found for account");
     }
 
-    const accessToken = decryptSecret(tokenResult.rows[0].access_token_encrypted);
+    const tokenRow = tokenResult.rows[0];
+    if (!tokenRow) {
+      throw new NotFoundException("No active X token found for account");
+    }
+
+    const accessToken = decryptSecret(tokenRow.access_token_encrypted);
     const timeline = await this.xClient().fetchTimeline(accessToken, limit);
 
     const client = await this.dbPool().connect();
