@@ -18,7 +18,9 @@ test("x_integration.completeConnect.state_validation.integration", async (t) => 
     `,
     [workspaceName]
   );
-  const workspaceId = workspaceResult.rows[0].id;
+  const workspaceRow = workspaceResult.rows[0];
+  assert.ok(workspaceRow, "workspace insert should return id");
+  const workspaceId = workspaceRow.id;
 
   t.after(async () => {
     await pool.query("DELETE FROM workspaces WHERE id = $1", [workspaceId]);
@@ -55,7 +57,9 @@ test("x_integration.completeConnect.state_validation.integration", async (t) => 
 
   const accounts = await service.listWorkspaceAccounts(workspaceId);
   assert.equal(accounts.length, 1);
-  assert.equal(accounts[0].id, connected.accountId);
+  const firstAccount = accounts[0];
+  assert.ok(firstAccount, "workspace account should exist");
+  assert.equal(firstAccount.id, connected.accountId);
 
   const ingest = await service.ingestTimeline(workspaceId, connected.accountId, 3);
   assert.equal(ingest.ok, true);
@@ -70,5 +74,7 @@ test("x_integration.completeConnect.state_validation.integration", async (t) => 
     `,
     [workspaceId, connected.accountId]
   );
-  assert.equal(timelineRows.rows[0].count, 3);
+  const timelineRow = timelineRows.rows[0];
+  assert.ok(timelineRow, "timeline count row should exist");
+  assert.equal(timelineRow.count, 3);
 });

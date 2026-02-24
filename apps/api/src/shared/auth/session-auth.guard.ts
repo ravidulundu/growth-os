@@ -95,29 +95,68 @@ function extractWorkspaceId(request: {
   );
 }
 
-function extractScopedResourceIds(request: {
+type ScopedRequest = {
   params?: Record<string, unknown>;
   body?: Record<string, unknown>;
   query?: Record<string, unknown>;
-}) {
-  return {
-    contentId:
-      pickStringValue(request.params?.contentId) ??
-      pickStringValue(request.body?.contentId) ??
-      pickStringValue(request.query?.contentId),
-    accountId:
-      pickStringValue(request.params?.accountId) ??
-      pickStringValue(request.body?.accountId) ??
-      pickStringValue(request.query?.accountId),
-    publishJobId:
-      pickStringValue(request.params?.publishJobId) ??
-      pickStringValue(request.body?.publishJobId) ??
-      pickStringValue(request.query?.publishJobId),
-    publishedPostId:
-      pickStringValue(request.params?.publishedPostId) ??
-      pickStringValue(request.body?.publishedPostId) ??
-      pickStringValue(request.query?.publishedPostId)
-  };
+};
+
+type ScopedResourceIds = {
+  contentId: string | null;
+  accountId: string | null;
+  publishJobId: string | null;
+  publishedPostId: string | null;
+};
+
+type ScopedResourceKey = keyof ScopedResourceIds;
+
+const SCOPED_RESOURCE_KEYS: readonly ScopedResourceKey[] = [
+  "contentId",
+  "accountId",
+  "publishJobId",
+  "publishedPostId"
+];
+
+const SCOPED_RESOURCE_ALIAS_MAP: Record<ScopedResourceKey, readonly string[]> = {
+  contentId: ["contentId"],
+  accountId: ["accountId"],
+  publishJobId: ["publishJobId"],
+  publishedPostId: ["publishedPostId"]
+};
+
+const SCOPED_RESOURCE_CONTAINERS: readonly (keyof ScopedRequest)[] = ["params", "body", "query"];
+
+function pickScopedResourceId(request: ScopedRequest, resourceKey: ScopedResourceKey) {
+  for (const container of SCOPED_RESOURCE_CONTAINERS) {
+    const source = request[container];
+    if (!source) {
+      continue;
+    }
+
+    for (const alias of SCOPED_RESOURCE_ALIAS_MAP[resourceKey]) {
+      const value = pickStringValue(source[alias]);
+      if (value) {
+        return value;
+      }
+    }
+  }
+
+  return null;
+}
+
+function extractScopedResourceIds(request: ScopedRequest): ScopedResourceIds {
+  return SCOPED_RESOURCE_KEYS.reduce<ScopedResourceIds>(
+    (result, resourceKey) => {
+      result[resourceKey] = pickScopedResourceId(request, resourceKey);
+      return result;
+    },
+    {
+      contentId: null,
+      accountId: null,
+      publishJobId: null,
+      publishedPostId: null
+    }
+  );
 }
 
 type RouteAwareRequest = {
@@ -127,7 +166,11 @@ type RouteAwareRequest = {
   url?: unknown;
 };
 
-const WORKSPACE_OPTIONAL_ROUTE_KEYS = new Set(["GET:/auth/session"]);
+const WORKSPACE_OPTIONAL_ROUTE_KEYS = new Set([
+  "GET:/auth/session",
+  "GET:/auth/session/state",
+  "PATCH:/auth/session/state"
+]);
 
 export function resolveRouteKey(request: RouteAwareRequest) {
   const method = typeof request.method === "string" ? request.method.toUpperCase() : "";
@@ -162,6 +205,216 @@ export function buildSessionTokenLookupCandidates(token: string) {
   return [token];
 }
 
+type GuardRequest = ScopedRequest &
+  RouteAwareRequest & {
+    headers: Record<string, string | string[] | undefined>;
+    auth?: { userId: string; sessionId: string; workspaceId?: string };
+  };
+
+type SessionIdentity = {
+  sessionId: string;
+  userId: string;
+};
+
+type DatabasePool = ReturnType<typeof getPool>;
+
+const SCOPED_RESOURCE_WORKSPACE_QUERIES: Record<ScopedResourceKey, string> = {
+  contentId: `
+    SELECT workspace_id
+    FROM contents
+    WHERE id = $1
+    LIMIT 1;
+  `,
+  accountId: `
+    SELECT workspace_id
+    FROM x_accounts
+    WHERE id = $1
+    LIMIT 1;
+  `,
+  publishJobId: `
+    SELECT workspace_id
+    FROM publish_jobs
+    WHERE id = $1
+    LIMIT 1;
+  `,
+  publishedPostId: `
+    SELECT workspace_id
+    FROM published_posts
+    WHERE id = $1
+    LIMIT 1;
+  `
+};
+
+function hasScopedResourceId(scopedResourceIds: ScopedResourceIds) {
+  return SCOPED_RESOURCE_KEYS.some((resourceKey) => Boolean(scopedResourceIds[resourceKey]));
+}
+
+function registerScopedWorkspaceId(scopedWorkspaceIds: Set<string>, workspaceId: string | null) {
+  if (!workspaceId) {
+    throw new ForbiddenException("Workspace access denied");
+  }
+
+  scopedWorkspaceIds.add(workspaceId);
+  if (scopedWorkspaceIds.size > 1) {
+    throw new ForbiddenException("Workspace access denied");
+  }
+}
+
+function resolveWorkspace(params: {
+  request: GuardRequest;
+  explicitWorkspaceId: string | null;
+  hasScopedResourceId: boolean;
+  scopedWorkspaceIds: Set<string>;
+}) {
+  const derivedWorkspaceId = params.scopedWorkspaceIds.values().next().value ?? null;
+  if (
+    params.explicitWorkspaceId &&
+    derivedWorkspaceId &&
+    params.explicitWorkspaceId !== derivedWorkspaceId
+  ) {
+    throw new ForbiddenException("Workspace access denied");
+  }
+
+  const workspaceId = params.explicitWorkspaceId ?? derivedWorkspaceId;
+  if (params.hasScopedResourceId && !workspaceId) {
+    throw new ForbiddenException("Workspace access denied");
+  }
+
+  if (
+    !workspaceId &&
+    !params.hasScopedResourceId &&
+    !isWorkspaceScopeOptionalRoute(params.request)
+  ) {
+    throw new ForbiddenException("Workspace ID is required");
+  }
+
+  return workspaceId;
+}
+
+function attachAuth(request: GuardRequest, session: SessionIdentity, workspaceId: string | null) {
+  request.auth = {
+    userId: session.userId,
+    sessionId: session.sessionId,
+    workspaceId: workspaceId ?? undefined
+  };
+}
+
+function updateSessionHeartbeat(pool: DatabasePool, logger: Logger, sessionId: string) {
+  // Best-effort activity update; auth should not fail solely due to this.
+  void pool
+    .query(
+      `
+        UPDATE better_auth_sessions
+        SET updated_at = now()
+        WHERE id = $1;
+      `,
+      [sessionId]
+    )
+    .catch((error) => {
+      logger.warn(
+        `Failed to update session heartbeat for ${sessionId}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    });
+}
+
+async function validateSession(
+  request: GuardRequest,
+  pool: DatabasePool
+): Promise<SessionIdentity> {
+  const token =
+    extractBearerToken(request.headers.authorization) ??
+    extractCookieToken(request.headers.cookie, "session_token");
+  if (!token) {
+    throw new UnauthorizedException("Missing or invalid session token");
+  }
+
+  const sessionResult = await pool.query<{ id: string; user_id: string }>(
+    `
+      SELECT id, user_id
+      FROM better_auth_sessions
+      WHERE token = ANY($1::text[])
+        AND expires_at > now()
+      ORDER BY created_at DESC
+      LIMIT 1;
+    `,
+    [buildSessionTokenLookupCandidates(token)]
+  );
+  const session = sessionResult.rows[0];
+
+  if (!session) {
+    throw new UnauthorizedException("Invalid or expired session");
+  }
+
+  return { sessionId: session.id, userId: session.user_id };
+}
+
+async function resolveScopedWorkspaceId(
+  pool: DatabasePool,
+  resourceKey: ScopedResourceKey,
+  resourceId: string
+) {
+  const result = await pool.query<{ workspace_id: string }>(
+    SCOPED_RESOURCE_WORKSPACE_QUERIES[resourceKey],
+    [resourceId]
+  );
+
+  return result.rows[0]?.workspace_id ?? null;
+}
+
+async function handleScopedResources(params: {
+  pool: DatabasePool;
+  scopedResourceIds: ScopedResourceIds;
+  scopedWorkspaceIds: Set<string>;
+}) {
+  const workspaceLookups: Array<Promise<string | null>> = [];
+
+  for (const resourceKey of SCOPED_RESOURCE_KEYS) {
+    const resourceId = params.scopedResourceIds[resourceKey];
+    if (!resourceId) {
+      continue;
+    }
+    if (!isUuid(resourceId)) {
+      throw new ForbiddenException("Workspace access denied");
+    }
+
+    workspaceLookups.push(resolveScopedWorkspaceId(params.pool, resourceKey, resourceId));
+  }
+
+  if (workspaceLookups.length === 0) {
+    return;
+  }
+
+  const workspaceIds = await Promise.all(workspaceLookups);
+  for (const workspaceId of workspaceIds) {
+    registerScopedWorkspaceId(params.scopedWorkspaceIds, workspaceId);
+  }
+}
+
+async function checkPermissions(params: {
+  pool: DatabasePool;
+  workspaceId: string | null;
+  userId: string;
+}) {
+  if (!params.workspaceId) {
+    return;
+  }
+
+  const membershipResult = await params.pool.query<{ ok: number }>(
+    `
+      SELECT 1 AS ok
+      FROM workspace_members
+      WHERE workspace_id = $1
+        AND user_id = $2
+      LIMIT 1;
+    `,
+    [params.workspaceId, params.userId]
+  );
+
+  if (!membershipResult.rows[0]) {
+    throw new ForbiddenException("Workspace access denied");
+  }
+}
+
 @Injectable()
 export class SessionAuthGuard implements CanActivate {
   private readonly logger = new Logger(SessionAuthGuard.name);
@@ -177,42 +430,9 @@ export class SessionAuthGuard implements CanActivate {
       return true;
     }
 
-    const request = context.switchToHttp().getRequest<{
-      headers: Record<string, string | string[] | undefined>;
-      method?: string;
-      routerPath?: string;
-      routeOptions?: { url?: string };
-      url?: string;
-      params?: Record<string, unknown>;
-      body?: Record<string, unknown>;
-      query?: Record<string, unknown>;
-      auth?: { userId: string; sessionId: string; workspaceId?: string };
-    }>();
-    const token =
-      extractBearerToken(request.headers.authorization) ??
-      extractCookieToken(request.headers.cookie, "session_token");
-    if (!token) {
-      throw new UnauthorizedException("Missing or invalid session token");
-    }
-    const tokenCandidates = buildSessionTokenLookupCandidates(token);
-
+    const request = context.switchToHttp().getRequest<GuardRequest>();
     const pool = getPool();
-    const betterAuthSessionResult = await pool.query<{ id: string; user_id: string }>(
-      `
-        SELECT id, user_id
-        FROM better_auth_sessions
-        WHERE token = ANY($1::text[])
-          AND expires_at > now()
-        ORDER BY created_at DESC
-        LIMIT 1;
-      `,
-      [tokenCandidates]
-    );
-
-    const session = betterAuthSessionResult.rows[0];
-    if (!session) {
-      throw new UnauthorizedException("Invalid or expired session");
-    }
+    const session = await validateSession(request, pool);
 
     const explicitWorkspaceId = extractWorkspaceId(request);
     if (explicitWorkspaceId && !isUuid(explicitWorkspaceId)) {
@@ -220,160 +440,18 @@ export class SessionAuthGuard implements CanActivate {
     }
 
     const scopedResourceIds = extractScopedResourceIds(request);
-    const hasScopedResourceId = Boolean(
-      scopedResourceIds.contentId ||
-        scopedResourceIds.accountId ||
-        scopedResourceIds.publishJobId ||
-        scopedResourceIds.publishedPostId
-    );
-
     const scopedWorkspaceIds = new Set<string>();
-    const registerScopedWorkspaceId = (workspaceId: string | null) => {
-      if (!workspaceId) {
-        throw new ForbiddenException("Workspace access denied");
-      }
-      scopedWorkspaceIds.add(workspaceId);
-      if (scopedWorkspaceIds.size > 1) {
-        throw new ForbiddenException("Workspace access denied");
-      }
-    };
+    await handleScopedResources({ pool, scopedResourceIds, scopedWorkspaceIds });
 
-    const workspaceLookupPromises: Array<Promise<string | null>> = [];
-
-    if (scopedResourceIds.contentId) {
-      if (!isUuid(scopedResourceIds.contentId)) {
-        throw new ForbiddenException("Workspace access denied");
-      }
-      workspaceLookupPromises.push(
-        pool
-          .query<{ workspace_id: string }>(
-            `
-              SELECT workspace_id
-              FROM contents
-              WHERE id = $1
-              LIMIT 1;
-            `,
-            [scopedResourceIds.contentId]
-          )
-          .then((result) => result.rows[0]?.workspace_id ?? null)
-      );
-    }
-
-    if (scopedResourceIds.accountId) {
-      if (!isUuid(scopedResourceIds.accountId)) {
-        throw new ForbiddenException("Workspace access denied");
-      }
-      workspaceLookupPromises.push(
-        pool
-          .query<{ workspace_id: string }>(
-            `
-              SELECT workspace_id
-              FROM x_accounts
-              WHERE id = $1
-              LIMIT 1;
-            `,
-            [scopedResourceIds.accountId]
-          )
-          .then((result) => result.rows[0]?.workspace_id ?? null)
-      );
-    }
-
-    if (scopedResourceIds.publishJobId) {
-      if (!isUuid(scopedResourceIds.publishJobId)) {
-        throw new ForbiddenException("Workspace access denied");
-      }
-      workspaceLookupPromises.push(
-        pool
-          .query<{ workspace_id: string }>(
-            `
-              SELECT workspace_id
-              FROM publish_jobs
-              WHERE id = $1
-              LIMIT 1;
-            `,
-            [scopedResourceIds.publishJobId]
-          )
-          .then((result) => result.rows[0]?.workspace_id ?? null)
-      );
-    }
-
-    if (scopedResourceIds.publishedPostId) {
-      if (!isUuid(scopedResourceIds.publishedPostId)) {
-        throw new ForbiddenException("Workspace access denied");
-      }
-      workspaceLookupPromises.push(
-        pool
-          .query<{ workspace_id: string }>(
-            `
-              SELECT workspace_id
-              FROM published_posts
-              WHERE id = $1
-              LIMIT 1;
-            `,
-            [scopedResourceIds.publishedPostId]
-          )
-          .then((result) => result.rows[0]?.workspace_id ?? null)
-      );
-    }
-
-    if (workspaceLookupPromises.length > 0) {
-      const resolvedWorkspaceIds = await Promise.all(workspaceLookupPromises);
-      for (const resolvedWorkspaceId of resolvedWorkspaceIds) {
-        registerScopedWorkspaceId(resolvedWorkspaceId);
-      }
-    }
-
-    const derivedWorkspaceId = scopedWorkspaceIds.values().next().value ?? null;
-    if (explicitWorkspaceId && derivedWorkspaceId && explicitWorkspaceId !== derivedWorkspaceId) {
-      throw new ForbiddenException("Workspace access denied");
-    }
-
-    const workspaceId = explicitWorkspaceId ?? derivedWorkspaceId;
-    if (hasScopedResourceId && !workspaceId) {
-      throw new ForbiddenException("Workspace access denied");
-    }
-    if (!workspaceId && !hasScopedResourceId && !isWorkspaceScopeOptionalRoute(request)) {
-      throw new ForbiddenException("Workspace ID is required");
-    }
-
-    if (workspaceId) {
-      const membershipResult = await pool.query<{ ok: number }>(
-        `
-          SELECT 1 AS ok
-          FROM workspace_members
-          WHERE workspace_id = $1
-            AND user_id = $2
-          LIMIT 1;
-        `,
-        [workspaceId, session.user_id]
-      );
-
-      if (!membershipResult.rows[0]) {
-        throw new ForbiddenException("Workspace access denied");
-      }
-    }
-
-    request.auth = {
-      userId: session.user_id,
-      sessionId: session.id,
-      workspaceId: workspaceId ?? undefined
-    };
-
-    // Best-effort activity update; auth should not fail solely due to this.
-    void pool
-      .query(
-        `
-          UPDATE better_auth_sessions
-          SET updated_at = now()
-          WHERE id = $1;
-        `,
-        [session.id]
-      )
-      .catch((error) => {
-        this.logger.warn(
-          `Failed to update session heartbeat for ${session.id}: ${error instanceof Error ? error.message : String(error)}`
-        );
-      });
+    const workspaceId = resolveWorkspace({
+      request,
+      explicitWorkspaceId,
+      hasScopedResourceId: hasScopedResourceId(scopedResourceIds),
+      scopedWorkspaceIds
+    });
+    await checkPermissions({ pool, workspaceId, userId: session.userId });
+    attachAuth(request, session, workspaceId);
+    updateSessionHeartbeat(pool, this.logger, session.sessionId);
 
     return true;
   }

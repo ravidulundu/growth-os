@@ -72,10 +72,36 @@ export type MagicLinkRequestResponse = {
   message: string;
 };
 
+export type WaitlistResponse = {
+  ok: boolean;
+  alreadyJoined: boolean;
+  message: string;
+};
+
 export type AuthSessionResponse = {
   ok: true;
   userId: string | null;
   sessionId: string | null;
+};
+
+export type OnboardingSteps = {
+  workspaceValidated: boolean;
+  xConnected: boolean;
+  timelineIngested: boolean;
+  styleExtracted: boolean;
+  draftGenerated: boolean;
+};
+
+export type OnboardingState = {
+  workspaceId: string | null;
+  steps: OnboardingSteps;
+  completedAt: string | null;
+  updatedAt: string | null;
+};
+
+export type AuthSessionStateResponse = {
+  ok: true;
+  onboarding: OnboardingState;
 };
 
 export type MagicLinkVerifyResponse = {
@@ -163,6 +189,52 @@ export type VersionRow = {
   created_at: string;
 };
 
+export type SeriesCadence = "hourly" | "daily" | "weekly" | "biweekly" | "monthly";
+
+export type ContentSeriesItem = {
+  id: string;
+  contentId: string;
+  position: number;
+  state: "pending" | "queued" | "published" | "archived";
+  contentTopic: string | null;
+  lastEnqueuedAt: string | null;
+  lastPublishedAt: string | null;
+};
+
+export type ContentSeries = {
+  id: string;
+  name: string;
+  cadence: SeriesCadence;
+  isActive: boolean;
+  enqueueNextOnPublish: boolean;
+  createdAt: string;
+  updatedAt: string;
+  nextItem: {
+    id: string;
+    contentId: string;
+    position: number;
+    state: "pending" | "queued" | "published" | "archived";
+    contentTopic: string | null;
+  } | null;
+  items: ContentSeriesItem[];
+};
+
+export type CreateSeriesResponse = {
+  ok: boolean;
+  seriesId: string;
+  itemCount: number;
+  isActive: boolean;
+  enqueueNextOnPublish: boolean;
+};
+
+export type RepurposeResponse = {
+  ok: boolean;
+  contentId: string;
+  text: string;
+  repurposeRunId: string;
+  sourceContentId: string;
+};
+
 export type PublishNowResponse = {
   ok: boolean;
   publishJobId: string;
@@ -170,16 +242,56 @@ export type PublishNowResponse = {
   scheduledFor: string;
 };
 
+export type ManualPublishFallbackResponse = {
+  composeUrl: string | null;
+  plainText: string;
+  reason: string;
+  reasonLabel: string;
+  reminderSent: boolean;
+  reminderSkipped: boolean;
+};
+
 export type JobRow = {
   id: string;
   content_id: string;
+  content_title?: string | null;
+  content_text: string;
   state: string;
   run_at: string;
   next_run_at: string;
   attempt_count: number;
   last_error_code: string | null;
+  manual_action_compose_url: string | null;
+  requires_manual_action: boolean;
   updated_at: string;
 };
+
+export async function schedulePublish(payload: {
+  workspaceId: string;
+  accountId: string;
+  contentId: string;
+  runAt: string;
+  dedupeKey?: string;
+  confirmHumanReview?: boolean;
+}) {
+  return requestJson<PublishNowResponse>("/scheduling/schedule", {
+    method: "POST",
+    body: payload
+  });
+}
+
+export async function createManualPublishFallback(payload: {
+  workspaceId: string;
+  contentId: string;
+  reasonCode: string;
+  publishJobId?: string;
+  reminderEmail?: string;
+}) {
+  return requestJson<ManualPublishFallbackResponse>("/scheduling/manual-fallback", {
+    method: "POST",
+    body: payload
+  });
+}
 
 export type AnalyticsSnapshot = {
   window_key: string;
@@ -195,6 +307,27 @@ export type AnalyticsResponse = {
   publishedPostId: string;
   externalPostId: string;
   snapshots: AnalyticsSnapshot[];
+};
+
+export type AnalyticsKpiRange = "24h" | "7d" | "30d";
+
+export type AnalyticsKpiSnapshotResponse = {
+  workspace_id: string;
+  range: AnalyticsKpiRange;
+  range_start: string;
+  range_end: string;
+  draft_to_publish_rate: number;
+  first_hour_success_rate: number;
+  policy_risk_rate: number;
+  time_to_first_value: number | null;
+  totals: {
+    draft_count: number;
+    published_count: number;
+    first_hour_sample_count: number;
+    first_hour_success_count: number;
+    policy_job_count: number;
+    policy_risk_count: number;
+  };
 };
 
 export type FirstHourAlertResponse = {
@@ -215,6 +348,48 @@ export type FirstHourAlertResponse = {
   };
 };
 
+export type AddCompetitorResponse = {
+  ok: true;
+  competitorAccountId: string;
+  handle: string;
+  platform: "x";
+  xUserId: string;
+  ingestedCount: number;
+  metricsCapturedCount: number;
+};
+
+export type CompetitorOverviewResponse = {
+  workspaceId: string;
+  generatedAt: string;
+  summary: {
+    competitorCount: number;
+    totalPosts: number;
+    metricsCoverage: number;
+  };
+  competitors: Array<{
+    id: string;
+    platform: "x";
+    handle: string;
+    xUserId: string | null;
+    isActive: boolean;
+    snapshotCount: number;
+    lastCapturedAt: string | null;
+  }>;
+  topHookTypes: Array<{ type: string; count: number }>;
+  postingWindows: Array<{ hour: number; count: number }>;
+  bestPerformingPosts: Array<{
+    competitorHandle: string;
+    xPostId: string;
+    textBody: string;
+    postedAt: string;
+    capturedAt: string;
+    impressions: number;
+    engagement: number;
+    engagementRate: number;
+    hookType: string;
+  }>;
+};
+
 export type BillingMeteringResponse = {
   planKey: string;
   monthlyGenerationLimit: number | null;
@@ -222,6 +397,34 @@ export type BillingMeteringResponse = {
   remainingUnits: number | null;
   periodStart: string;
   periodEnd: string;
+  billing: {
+    provider: "stripe";
+    status: string;
+    cancelAtPeriodEnd: boolean;
+    currentPeriodEnd: string | null;
+    planKey: "mvp0" | "free" | "creator" | "growth" | "team" | null;
+  } | null;
+  latestInvoice: {
+    status: string;
+    amountCents: number;
+    currency: string | null;
+    hostedInvoiceUrl: string | null;
+    invoicePdfUrl: string | null;
+    periodEnd: string | null;
+    paidAt: string | null;
+  } | null;
+};
+
+export type BillingPlanKey = "free" | "creator" | "growth" | "team";
+
+export type BillingCheckoutPlanKey = Exclude<BillingPlanKey, "free">;
+
+export type BillingCheckoutSessionResponse = {
+  url: string;
+};
+
+export type BillingPortalSessionResponse = {
+  url: string;
 };
 
 export async function fetchHealth() {
@@ -242,9 +445,33 @@ export async function requestMagicLink(
   });
 }
 
+export async function joinWaitlist(email: string, source = "landing") {
+  return requestJson<WaitlistResponse>("/auth/waitlist", {
+    method: "POST",
+    body: { email, source }
+  });
+}
+
 export async function fetchAuthSession() {
   return requestJson<AuthSessionResponse>("/auth/session", {
     method: "GET"
+  });
+}
+
+export async function fetchAuthSessionState() {
+  return requestJson<AuthSessionStateResponse>("/auth/session/state", {
+    method: "GET"
+  });
+}
+
+export async function patchAuthSessionState(payload: {
+  workspaceId?: string;
+  steps?: Partial<OnboardingSteps>;
+  completedAt?: string | null;
+}) {
+  return requestJson<AuthSessionStateResponse>("/auth/session/state", {
+    method: "PATCH",
+    body: payload
   });
 }
 
@@ -328,6 +555,41 @@ export async function createDraft(payload: {
   });
 }
 
+export async function createSeries(payload: {
+  workspaceId: string;
+  accountId: string;
+  name: string;
+  cadence: SeriesCadence;
+  isActive?: boolean;
+  enqueueNextOnPublish?: boolean;
+  contentIds: string[];
+}) {
+  return requestJson<CreateSeriesResponse>("/generation/series", {
+    method: "POST",
+    body: payload
+  });
+}
+
+export async function listSeries(workspaceId: string, accountId: string) {
+  return requestJson<ContentSeries[]>(`/generation/series/${workspaceId}/${accountId}`, {
+    method: "GET"
+  });
+}
+
+export async function repurposeContent(payload: {
+  workspaceId: string;
+  sourceContentId: string;
+  targetType: "tweet" | "thread" | "reply" | "quote";
+  accountId?: string;
+  promptInput?: string;
+  templateName?: string;
+}) {
+  return requestJson<RepurposeResponse>("/generation/repurpose", {
+    method: "POST",
+    body: payload
+  });
+}
+
 export async function createVersion(workspaceId: string, contentId: string, textBody: string) {
   return requestJson<CreateVersionResponse>(`/generation/content/${contentId}/version`, {
     method: "POST",
@@ -375,8 +637,50 @@ export async function getFirstHourAlert(workspaceId: string, contentId: string) 
   );
 }
 
+export async function getAnalyticsKpi(workspaceId: string, range: AnalyticsKpiRange = "7d") {
+  return requestJson<AnalyticsKpiSnapshotResponse>(`/analytics/kpi/${workspaceId}?range=${range}`, {
+    method: "GET"
+  });
+}
+
+export async function addCompetitorAccount(payload: {
+  workspaceId: string;
+  handle: string;
+  platform?: "x";
+  limit?: number;
+}) {
+  const { workspaceId, ...body } = payload;
+  return requestJson<AddCompetitorResponse>(`/analytics/competitors/${workspaceId}/add`, {
+    method: "POST",
+    body
+  });
+}
+
+export async function getCompetitorOverview(workspaceId: string) {
+  return requestJson<CompetitorOverviewResponse>(`/analytics/competitors/${workspaceId}/overview`, {
+    method: "GET"
+  });
+}
+
 export async function getBillingMetering(workspaceId: string) {
   return requestJson<BillingMeteringResponse>(`/billing/metering/${workspaceId}`, {
     method: "GET"
+  });
+}
+
+export async function createBillingCheckoutSession(payload: {
+  workspaceId: string;
+  planKey: BillingCheckoutPlanKey;
+}) {
+  return requestJson<BillingCheckoutSessionResponse>("/billing/checkout-session", {
+    method: "POST",
+    body: payload
+  });
+}
+
+export async function createBillingPortalSession(workspaceId: string) {
+  return requestJson<BillingPortalSessionResponse>("/billing/portal-session", {
+    method: "POST",
+    body: { workspaceId }
   });
 }

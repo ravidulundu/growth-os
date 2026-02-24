@@ -1,11 +1,60 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { BadRequestException, ConflictException } from "@nestjs/common";
 import { closePool, getPool } from "../../../shared/db/pool";
 import { closeSchedulingQueues } from "../queue";
 import { SchedulingService } from "../scheduling.service";
 
-test("scheduling.publishNow.safeModeAndDedupe.integration", async (t) => {
+type SchedulingFixture = {
+  previousSafeMode: string | undefined;
+  pool: ReturnType<typeof getPool>;
+  service: SchedulingService;
+  workspaceId: string;
+  accountId: string;
+  contentId: string;
+};
+
+type ContentSeedInput = {
+  pool: ReturnType<typeof getPool>;
+  workspaceId: string;
+  accountId: string;
+  topic: string;
+  promptInput: string;
+  currentText: string;
+};
+
+type PublishContext = {
+  service: SchedulingService;
+  pool: ReturnType<typeof getPool>;
+  workspaceId: string;
+  accountId: string;
+  contentId: string;
+};
+
+async function createDraftContent(input: ContentSeedInput): Promise<string> {
+  const { pool, workspaceId, accountId, topic, promptInput, currentText } = input;
+  const contentResult = await pool.query<{ id: string }>(
+    `
+      INSERT INTO contents (
+        workspace_id,
+        account_id,
+        type,
+        status,
+        topic,
+        prompt_input,
+        current_text
+      )
+      VALUES ($1, $2, 'tweet', 'draft', $3, $4, $5)
+      RETURNING id;
+    `,
+    [workspaceId, accountId, topic, promptInput, currentText]
+  );
+  const contentRow = contentResult.rows[0];
+  assert.ok(contentRow, "content insert should return id");
+  return contentRow.id;
+}
+
+async function setupSchedulingFixture(): Promise<SchedulingFixture> {
   const previousSafeMode = process.env.SAFE_MODE_ENABLED;
   process.env.SAFE_MODE_ENABLED = "true";
 
@@ -21,7 +70,9 @@ test("scheduling.publishNow.safeModeAndDedupe.integration", async (t) => {
     `,
     [`scheduling-integration-${suffix}`]
   );
-  const workspaceId = workspaceResult.rows[0].id;
+  const workspaceRow = workspaceResult.rows[0];
+  assert.ok(workspaceRow, "workspace insert should return id");
+  const workspaceId = workspaceRow.id;
 
   const accountResult = await pool.query<{ id: string }>(
     `
@@ -31,25 +82,31 @@ test("scheduling.publishNow.safeModeAndDedupe.integration", async (t) => {
     `,
     [workspaceId, `x-user-${suffix}`, `mock_${suffix}`]
   );
-  const accountId = accountResult.rows[0].id;
+  const accountRow = accountResult.rows[0];
+  assert.ok(accountRow, "account insert should return id");
+  const accountId = accountRow.id;
 
-  const contentResult = await pool.query<{ id: string }>(
-    `
-      INSERT INTO contents (
-        workspace_id,
-        account_id,
-        type,
-        status,
-        topic,
-        prompt_input,
-        current_text
-      )
-      VALUES ($1, $2, 'tweet', 'draft', 'topic', 'topic', 'publish me')
-      RETURNING id;
-    `,
-    [workspaceId, accountId]
-  );
-  const contentId = contentResult.rows[0].id;
+  const contentId = await createDraftContent({
+    pool,
+    workspaceId,
+    accountId,
+    topic: "topic",
+    promptInput: "topic",
+    currentText: "publish me"
+  });
+
+  return {
+    previousSafeMode,
+    pool,
+    service,
+    workspaceId,
+    accountId,
+    contentId
+  };
+}
+
+function registerSchedulingCleanup(t: TestContext, fixture: SchedulingFixture): void {
+  const { previousSafeMode, pool, workspaceId } = fixture;
 
   t.after(async () => {
     await closeSchedulingQueues();
@@ -61,7 +118,14 @@ test("scheduling.publishNow.safeModeAndDedupe.integration", async (t) => {
     }
     await closePool();
   });
+}
 
+async function assertSafeModeRequiresReview(
+  service: SchedulingService,
+  workspaceId: string,
+  accountId: string,
+  contentId: string
+): Promise<void> {
   await assert.rejects(
     () =>
       service.publishNow({
@@ -72,7 +136,10 @@ test("scheduling.publishNow.safeModeAndDedupe.integration", async (t) => {
     (error) =>
       error instanceof BadRequestException && error.message.includes("confirmHumanReview=true")
   );
+}
 
+async function assertExplicitDedupeFlow(context: PublishContext): Promise<void> {
+  const { service, pool, workspaceId, accountId, contentId } = context;
   const first = await service.publishNow({
     workspaceId,
     accountId,
@@ -98,7 +165,9 @@ test("scheduling.publishNow.safeModeAndDedupe.integration", async (t) => {
     `,
     [contentId]
   );
-  assert.equal(contentStatus.rows[0]?.status, "scheduled");
+  const statusRow = contentStatus.rows[0];
+  assert.ok(statusRow, "content status row should exist");
+  assert.equal(statusRow.status, "scheduled");
 
   await assert.rejects(
     () =>
@@ -111,24 +180,22 @@ test("scheduling.publishNow.safeModeAndDedupe.integration", async (t) => {
       }),
     (error) => error instanceof ConflictException
   );
+}
 
-  const implicitContentResult = await pool.query<{ id: string }>(
-    `
-      INSERT INTO contents (
-        workspace_id,
-        account_id,
-        type,
-        status,
-        topic,
-        prompt_input,
-        current_text
-      )
-      VALUES ($1, $2, 'tweet', 'draft', 'topic-implicit', 'topic-implicit', 'publish me implicitly')
-      RETURNING id;
-    `,
-    [workspaceId, accountId]
-  );
-  const implicitContentId = implicitContentResult.rows[0].id;
+async function assertImplicitDedupeFlow(
+  service: SchedulingService,
+  pool: ReturnType<typeof getPool>,
+  workspaceId: string,
+  accountId: string
+): Promise<void> {
+  const implicitContentId = await createDraftContent({
+    pool,
+    workspaceId,
+    accountId,
+    topic: "topic-implicit",
+    promptInput: "topic-implicit",
+    currentText: "publish me implicitly"
+  });
 
   const implicitFirst = await service.publishNow({
     workspaceId,
@@ -147,5 +214,30 @@ test("scheduling.publishNow.safeModeAndDedupe.integration", async (t) => {
         confirmHumanReview: true
       }),
     (error) => error instanceof ConflictException
+  );
+}
+
+test("scheduling.publishNow.safeModeAndDedupe.integration", async (t) => {
+  const fixture = await setupSchedulingFixture();
+  registerSchedulingCleanup(t, fixture);
+
+  await assertSafeModeRequiresReview(
+    fixture.service,
+    fixture.workspaceId,
+    fixture.accountId,
+    fixture.contentId
+  );
+  await assertExplicitDedupeFlow({
+    service: fixture.service,
+    pool: fixture.pool,
+    workspaceId: fixture.workspaceId,
+    accountId: fixture.accountId,
+    contentId: fixture.contentId
+  });
+  await assertImplicitDedupeFlow(
+    fixture.service,
+    fixture.pool,
+    fixture.workspaceId,
+    fixture.accountId
   );
 });

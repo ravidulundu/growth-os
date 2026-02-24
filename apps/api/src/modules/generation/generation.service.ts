@@ -1,9 +1,11 @@
 import { HttpException, HttpStatus, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import type { PoolClient } from "pg";
 import { getPool } from "../../shared/db/pool";
 import { BillingService } from "../billing/billing.service";
 import type { StyleProfile } from "../style/style.service";
 
 export type ContentType = "tweet" | "thread" | "reply" | "quote";
+export type SeriesCadence = "hourly" | "daily" | "weekly" | "biweekly" | "monthly";
 
 type PromptTemplate = {
   name: string;
@@ -23,6 +25,60 @@ type PromptTemplateRow = {
   is_active: boolean;
 };
 
+type CreateDraftParams = {
+  workspaceId: string;
+  accountId: string;
+  topic: string;
+  type: ContentType;
+  promptInput?: string;
+  templateName?: string;
+};
+
+type CreateSeriesParams = {
+  workspaceId: string;
+  accountId: string;
+  name: string;
+  cadence: SeriesCadence;
+  isActive?: boolean;
+  enqueueNextOnPublish?: boolean;
+  contentIds: string[];
+};
+
+type RepurposeParams = {
+  workspaceId: string;
+  sourceContentId: string;
+  targetType: ContentType;
+  accountId?: string;
+  promptInput?: string;
+  templateName?: string;
+};
+
+type SeriesRow = {
+  id: string;
+  name: string;
+  cadence: SeriesCadence;
+  is_active: boolean;
+  enqueue_next_on_publish: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+type SeriesItemRow = {
+  id: string;
+  series_id: string;
+  content_id: string;
+  position: number;
+  state: string;
+  last_enqueued_at: string | null;
+  last_published_at: string | null;
+  content_topic: string | null;
+};
+
+type DraftContext = {
+  styleProfile: StyleProfile | undefined;
+  template: PromptTemplate;
+};
+
 const CTA_PATTERN = /\b(join|try|read|check|follow|share|start|learn)\b/gi;
 const ABSOLUTE_CLAIM_PATTERN = /\b(?:kesin|garanti|asla|mutlaka)\b|100%/gi;
 
@@ -37,6 +93,39 @@ function contentPrefix(type: ContentType) {
     return "Quote taslağı";
   }
   return "Tweet taslağı";
+}
+
+function uniqueOrderedIds(ids: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const id of ids) {
+    if (seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    result.push(id);
+  }
+  return result;
+}
+
+function repurposeTopic(sourceTopic: string | null, sourceText: string, targetType: ContentType) {
+  const base = sourceTopic?.trim() || sourceText.slice(0, 120).replace(/\s+/g, " ").trim();
+  return `Repurpose to ${targetType}: ${base}`;
+}
+
+function repurposePrompt(sourceType: ContentType, sourceText: string, userPromptInput?: string) {
+  const instructions = [
+    `Kaynak içerik türü: ${sourceType}.`,
+    "Aynı çekirdek fikri koru, ancak yeni hedef formata yeniden yapılandır.",
+    "Aynı cümleleri birebir kopyalama.",
+    `Kaynak içerik: ${sourceText}`
+  ];
+
+  if (userPromptInput?.trim()) {
+    instructions.push(`Ek talimat: ${userPromptInput.trim()}`);
+  }
+
+  return instructions.join(" ");
 }
 
 function typeInstruction(type: ContentType) {
@@ -426,6 +515,337 @@ export class GenerationService {
     return getPool();
   }
 
+  private async ensureSeriesContentsExist(client: PoolClient, params: CreateSeriesParams) {
+    const orderedContentIds = uniqueOrderedIds(params.contentIds);
+    const contentCheck = await client.query<{ id: string }>(
+      `
+        SELECT id
+        FROM contents
+        WHERE workspace_id = $1
+          AND account_id = $2
+          AND id = ANY($3::uuid[]);
+      `,
+      [params.workspaceId, params.accountId, orderedContentIds]
+    );
+
+    if (contentCheck.rows.length !== orderedContentIds.length) {
+      throw new NotFoundException("One or more content items were not found for this account");
+    }
+
+    return orderedContentIds;
+  }
+
+  private async insertSeries(client: PoolClient, params: CreateSeriesParams) {
+    const result = await client.query<{ id: string }>(
+      `
+        INSERT INTO content_series (
+          workspace_id,
+          account_id,
+          name,
+          cadence,
+          is_active,
+          enqueue_next_on_publish
+        )
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id;
+      `,
+      [
+        params.workspaceId,
+        params.accountId,
+        params.name.trim(),
+        params.cadence,
+        params.isActive ?? false,
+        params.enqueueNextOnPublish ?? false
+      ]
+    );
+
+    const row = result.rows[0];
+    if (!row) {
+      throw new HttpException("Failed to create content series", HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    return row.id;
+  }
+
+  private async insertSeriesItems(client: PoolClient, seriesId: string, contentIds: string[]) {
+    for (const [index, contentId] of contentIds.entries()) {
+      await client.query(
+        `
+          INSERT INTO content_series_items (series_id, content_id, position, state)
+          VALUES ($1, $2, $3, 'pending');
+        `,
+        [seriesId, contentId, index + 1]
+      );
+    }
+  }
+
+  async createSeries(params: CreateSeriesParams) {
+    const client = await this.dbPool().connect();
+    try {
+      await client.query("BEGIN");
+      const orderedContentIds = await this.ensureSeriesContentsExist(client, params);
+      const seriesId = await this.insertSeries(client, params);
+      await this.insertSeriesItems(client, seriesId, orderedContentIds);
+
+      await client.query(
+        `
+          INSERT INTO audit_logs (workspace_id, action, entity_type, entity_id, result, metadata)
+          VALUES ($1, 'generation.create_series', 'content_series', $2, 'success', $3::jsonb);
+        `,
+        [
+          params.workspaceId,
+          seriesId,
+          JSON.stringify({
+            accountId: params.accountId,
+            cadence: params.cadence,
+            itemCount: orderedContentIds.length,
+            isActive: params.isActive ?? false,
+            enqueueNextOnPublish: params.enqueueNextOnPublish ?? false
+          })
+        ]
+      );
+      await client.query("COMMIT");
+
+      return {
+        ok: true,
+        seriesId,
+        itemCount: orderedContentIds.length,
+        isActive: params.isActive ?? false,
+        enqueueNextOnPublish: params.enqueueNextOnPublish ?? false
+      };
+    } catch (error) {
+      await this.rollbackCreateDraft(client);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private resolveNextSeriesItem<T extends { state: string }>(items: T[]) {
+    return (
+      items.find((item) => item.state === "pending") ??
+      items.find((item) => item.state === "queued") ??
+      items.find((item) => item.state === "published") ??
+      null
+    );
+  }
+
+  private async loadSeriesRows(workspaceId: string, accountId: string) {
+    const result = await this.dbPool().query<SeriesRow>(
+      `
+        SELECT id, name, cadence, is_active, enqueue_next_on_publish, created_at, updated_at
+        FROM content_series
+        WHERE workspace_id = $1
+          AND account_id = $2
+        ORDER BY updated_at DESC;
+      `,
+      [workspaceId, accountId]
+    );
+    return result.rows;
+  }
+
+  private async loadSeriesItemRows(seriesIds: string[]) {
+    const result = await this.dbPool().query<SeriesItemRow>(
+      `
+        SELECT
+          csi.id,
+          csi.series_id,
+          csi.content_id,
+          csi.position,
+          csi.state,
+          csi.last_enqueued_at,
+          csi.last_published_at,
+          c.topic AS content_topic
+        FROM content_series_items csi
+        JOIN contents c ON c.id = csi.content_id
+        WHERE csi.series_id = ANY($1::uuid[])
+        ORDER BY csi.series_id ASC, csi.position ASC;
+      `,
+      [seriesIds]
+    );
+    return result.rows;
+  }
+
+  private groupSeriesItemsBySeries(itemRows: SeriesItemRow[]) {
+    const bySeries = new Map<string, SeriesItemRow[]>();
+    for (const item of itemRows) {
+      const list = bySeries.get(item.series_id) ?? [];
+      list.push(item);
+      bySeries.set(item.series_id, list);
+    }
+    return bySeries;
+  }
+
+  private mapSeriesRowToResponse(series: SeriesRow, items: SeriesItemRow[]) {
+    const nextItem = this.resolveNextSeriesItem(items);
+    return {
+      id: series.id,
+      name: series.name,
+      cadence: series.cadence,
+      isActive: series.is_active,
+      enqueueNextOnPublish: series.enqueue_next_on_publish,
+      createdAt: series.created_at,
+      updatedAt: series.updated_at,
+      nextItem: nextItem
+        ? {
+            id: nextItem.id,
+            contentId: nextItem.content_id,
+            position: nextItem.position,
+            state: nextItem.state,
+            contentTopic: nextItem.content_topic
+          }
+        : null,
+      items: items.map((item) => ({
+        id: item.id,
+        contentId: item.content_id,
+        position: item.position,
+        state: item.state,
+        contentTopic: item.content_topic,
+        lastEnqueuedAt: item.last_enqueued_at,
+        lastPublishedAt: item.last_published_at
+      }))
+    };
+  }
+
+  async listSeries(workspaceId: string, accountId: string) {
+    const seriesRows = await this.loadSeriesRows(workspaceId, accountId);
+    if (seriesRows.length === 0) {
+      return [];
+    }
+
+    const seriesIds = seriesRows.map((row) => row.id);
+    const itemRows = await this.loadSeriesItemRows(seriesIds);
+    const bySeries = this.groupSeriesItemsBySeries(itemRows);
+
+    return seriesRows.map((series) => {
+      const items = bySeries.get(series.id) ?? [];
+      return this.mapSeriesRowToResponse(series, items);
+    });
+  }
+
+  private async createRepurposeRun(
+    client: PoolClient,
+    params: RepurposeParams,
+    sourceType: ContentType
+  ) {
+    const result = await client.query<{ id: string }>(
+      `
+        INSERT INTO repurpose_runs (workspace_id, source_content_id, target_type, status, metadata)
+        VALUES ($1, $2, $3, 'processing', $4::jsonb)
+        RETURNING id;
+      `,
+      [
+        params.workspaceId,
+        params.sourceContentId,
+        params.targetType,
+        JSON.stringify({
+          sourceType,
+          requestedAccountId: params.accountId ?? null
+        })
+      ]
+    );
+
+    const row = result.rows[0];
+    if (!row) {
+      throw new HttpException("Failed to create repurpose run", HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    return row.id;
+  }
+
+  private async updateRepurposeRun(
+    runId: string,
+    status: "completed" | "failed",
+    metadata: Record<string, unknown>
+  ) {
+    await this.dbPool().query(
+      `
+        UPDATE repurpose_runs
+        SET status = $2,
+            metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb,
+            updated_at = now()
+        WHERE id = $1;
+      `,
+      [runId, status, JSON.stringify(metadata)]
+    );
+  }
+
+  private async loadRepurposeSource(params: RepurposeParams) {
+    const result = await this.dbPool().query<{
+      id: string;
+      account_id: string | null;
+      type: ContentType;
+      topic: string | null;
+      current_text: string;
+    }>(
+      `
+        SELECT id, account_id, type, topic, current_text
+        FROM contents
+        WHERE id = $1
+          AND workspace_id = $2
+        LIMIT 1;
+      `,
+      [params.sourceContentId, params.workspaceId]
+    );
+
+    const source = result.rows[0];
+    if (!source) {
+      throw new NotFoundException("Source content not found");
+    }
+
+    return source;
+  }
+
+  async repurposeContent(params: RepurposeParams) {
+    const source = await this.loadRepurposeSource(params);
+    const accountId = params.accountId ?? source.account_id;
+    if (!accountId) {
+      throw new HttpException("Account ID is required for repurpose flow", HttpStatus.BAD_REQUEST);
+    }
+
+    const runClient = await this.dbPool().connect();
+    let runId = "";
+    try {
+      await runClient.query("BEGIN");
+      runId = await this.createRepurposeRun(runClient, params, source.type);
+      await runClient.query("COMMIT");
+    } catch (error) {
+      await this.rollbackCreateDraft(runClient);
+      throw error;
+    } finally {
+      runClient.release();
+    }
+
+    try {
+      const draft = await this.createDraft({
+        workspaceId: params.workspaceId,
+        accountId,
+        type: params.targetType,
+        topic: repurposeTopic(source.topic, source.current_text, params.targetType),
+        promptInput: repurposePrompt(source.type, source.current_text, params.promptInput),
+        templateName: params.templateName
+      });
+      await this.updateRepurposeRun(runId, "completed", {
+        generatedContentId: draft.contentId,
+        generatedType: params.targetType
+      });
+
+      return {
+        ...draft,
+        repurposeRunId: runId,
+        sourceContentId: source.id
+      };
+    } catch (error) {
+      await this.updateRepurposeRun(runId, "failed", {
+        error:
+          error instanceof Error
+            ? { name: error.name, message: error.message }
+            : { message: "Repurpose failed" }
+      });
+      throw error;
+    }
+  }
+
   protected async preflightGenerationLimit(workspaceId: string, requestedUnits = 1) {
     // Non-atomic TOCTOU precheck: avoids expensive LLM calls when quota is clearly exceeded.
     // Authoritative enforcement happens atomically in usage_events INSERT path.
@@ -466,10 +886,11 @@ export class GenerationService {
     sql += " ORDER BY updated_at DESC LIMIT 1;";
 
     const result = await this.dbPool().query<PromptTemplateRow>(sql, queryParams);
-    if (!result.rows[0]) {
+    const row = result.rows[0];
+    if (!row) {
       return defaultTemplate(type);
     }
-    return toPromptTemplate(result.rows[0]);
+    return toPromptTemplate(row);
   }
 
   async listPromptTemplates(workspaceId: string, contentType?: ContentType) {
@@ -560,6 +981,9 @@ export class GenerationService {
     );
 
     const row = result.rows[0];
+    if (!row) {
+      throw new HttpException("Failed to upsert prompt template", HttpStatus.INTERNAL_SERVER_ERROR);
+    }
     return {
       name: row.name,
       contentType: row.content_type,
@@ -595,14 +1019,7 @@ export class GenerationService {
     }
   }
 
-  async createDraft(params: {
-    workspaceId: string;
-    accountId: string;
-    topic: string;
-    type: ContentType;
-    promptInput?: string;
-    templateName?: string;
-  }) {
+  protected async prepareDraftContext(params: CreateDraftParams): Promise<DraftContext> {
     await this.preflightGenerationLimit(params.workspaceId, 1);
 
     const [styleResult, template] = await Promise.all([
@@ -618,105 +1035,175 @@ export class GenerationService {
       this.findPromptTemplate(params.workspaceId, params.type, params.templateName)
     ]);
 
+    return {
+      styleProfile: styleResult.rows[0]?.style_profile,
+      template
+    };
+  }
+
+  protected async insertDraftContent(
+    client: PoolClient,
+    params: CreateDraftParams,
+    generatedText: string
+  ) {
+    const contentResult = await client.query<{ id: string }>(
+      `
+        INSERT INTO contents (
+          workspace_id,
+          account_id,
+          type,
+          status,
+          topic,
+          prompt_input,
+          current_text
+        )
+        VALUES ($1, $2, $3, 'draft', $4, $5, $6)
+        RETURNING id;
+      `,
+      [
+        params.workspaceId,
+        params.accountId,
+        params.type,
+        params.topic,
+        params.promptInput ?? params.topic,
+        generatedText
+      ]
+    );
+    const contentRow = contentResult.rows[0];
+    if (!contentRow) {
+      throw new HttpException("Failed to persist draft content", HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    return contentRow.id;
+  }
+
+  protected async insertDraftVersion(
+    client: PoolClient,
+    input: {
+      params: CreateDraftParams;
+      contentId: string;
+      generatedText: string;
+      template: PromptTemplate;
+    }
+  ) {
+    await client.query(
+      `
+        INSERT INTO content_versions (content_id, version_no, text_body, prompt_config)
+        VALUES ($1, 1, $2, $3::jsonb);
+      `,
+      [
+        input.contentId,
+        input.generatedText,
+        JSON.stringify({
+          topic: input.params.topic,
+          type: input.params.type,
+          templateName: input.template.name,
+          templateConfig: input.template.promptConfig
+        })
+      ]
+    );
+  }
+
+  protected async insertDraftUsageEvent(
+    client: PoolClient,
+    params: CreateDraftParams,
+    templateName: string,
+    planKey: string
+  ) {
+    await client.query(
+      `
+        INSERT INTO usage_events (workspace_id, account_id, event_type, endpoint_key, units, metadata)
+        VALUES ($1, $2, 'content.generate', 'generation.draft', 1, $3::jsonb);
+      `,
+      [
+        params.workspaceId,
+        params.accountId,
+        JSON.stringify({
+          type: params.type,
+          templateName,
+          planKey
+        })
+      ]
+    );
+  }
+
+  protected async insertDraftAuditLog(
+    client: PoolClient,
+    params: CreateDraftParams,
+    contentId: string,
+    templateName: string
+  ) {
+    await client.query(
+      `
+        INSERT INTO audit_logs (workspace_id, action, entity_type, entity_id, result, metadata)
+        VALUES ($1, 'generation.create_draft', 'content', $2, 'success', $3::jsonb);
+      `,
+      [
+        params.workspaceId,
+        contentId,
+        JSON.stringify({ topic: params.topic, type: params.type, templateName })
+      ]
+    );
+  }
+
+  protected async persistDraft(
+    client: PoolClient,
+    params: CreateDraftParams,
+    generatedText: string,
+    template: PromptTemplate
+  ) {
+    const metering = await this.billingService.enforceGenerationLimit(
+      params.workspaceId,
+      this.billingService.newTransactionExecutor(client),
+      1
+    );
+
+    const contentId = await this.insertDraftContent(client, params, generatedText);
+    await this.insertDraftVersion(client, {
+      params,
+      contentId,
+      generatedText,
+      template
+    });
+    await this.insertDraftUsageEvent(client, params, template.name, metering.planKey);
+    await this.insertDraftAuditLog(client, params, contentId, template.name);
+
+    return contentId;
+  }
+
+  protected async rollbackCreateDraft(client: PoolClient) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      this.logger.warn(
+        `Failed to rollback createDraft transaction: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
+      );
+    }
+  }
+
+  async createDraft(params: CreateDraftParams) {
+    const context = await this.prepareDraftContext(params);
+
     const generatedText = await this.generateDraftText({
       topic: params.topic,
       type: params.type,
       promptInput: params.promptInput,
-      style: styleResult.rows[0]?.style_profile,
-      template
+      style: context.styleProfile,
+      template: context.template
     });
 
     const client = await this.dbPool().connect();
     try {
       await client.query("BEGIN");
-      const metering = await this.billingService.enforceGenerationLimit(
-        params.workspaceId,
-        this.billingService.newTransactionExecutor(client),
-        1
-      );
-      const contentResult = await client.query<{ id: string }>(
-        `
-          INSERT INTO contents (
-            workspace_id,
-            account_id,
-            type,
-            status,
-            topic,
-            prompt_input,
-            current_text
-          )
-          VALUES ($1, $2, $3, 'draft', $4, $5, $6)
-          RETURNING id;
-        `,
-        [
-          params.workspaceId,
-          params.accountId,
-          params.type,
-          params.topic,
-          params.promptInput ?? params.topic,
-          generatedText
-        ]
-      );
-
-      await client.query(
-        `
-          INSERT INTO content_versions (content_id, version_no, text_body, prompt_config)
-          VALUES ($1, 1, $2, $3::jsonb);
-        `,
-        [
-          contentResult.rows[0].id,
-          generatedText,
-          JSON.stringify({
-            topic: params.topic,
-            type: params.type,
-            templateName: template.name,
-            templateConfig: template.promptConfig
-          })
-        ]
-      );
-
-      await client.query(
-        `
-          INSERT INTO usage_events (workspace_id, account_id, event_type, endpoint_key, units, metadata)
-          VALUES ($1, $2, 'content.generate', 'generation.draft', 1, $3::jsonb);
-        `,
-        [
-          params.workspaceId,
-          params.accountId,
-          JSON.stringify({
-            type: params.type,
-            templateName: template.name,
-            planKey: metering.planKey
-          })
-        ]
-      );
-
-      await client.query(
-        `
-          INSERT INTO audit_logs (workspace_id, action, entity_type, entity_id, result, metadata)
-          VALUES ($1, 'generation.create_draft', 'content', $2, 'success', $3::jsonb);
-        `,
-        [
-          params.workspaceId,
-          contentResult.rows[0].id,
-          JSON.stringify({ topic: params.topic, type: params.type, templateName: template.name })
-        ]
-      );
-
+      const contentId = await this.persistDraft(client, params, generatedText, context.template);
       await client.query("COMMIT");
       return {
         ok: true,
-        contentId: contentResult.rows[0].id,
+        contentId,
         text: generatedText
       };
     } catch (error) {
-      try {
-        await client.query("ROLLBACK");
-      } catch (rollbackError) {
-        this.logger.warn(
-          `Failed to rollback createDraft transaction: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`
-        );
-      }
+      await this.rollbackCreateDraft(client);
       throw error;
     } finally {
       client.release();
@@ -751,7 +1238,15 @@ export class GenerationService {
         [params.contentId]
       );
 
-      const nextVersion = Number(versionResult.rows[0].next_version);
+      const versionRow = versionResult.rows[0];
+      if (!versionRow) {
+        throw new HttpException(
+          "Failed to resolve next content version",
+          HttpStatus.INTERNAL_SERVER_ERROR
+        );
+      }
+
+      const nextVersion = Number(versionRow.next_version);
       await client.query(
         `
           INSERT INTO content_versions (content_id, version_no, text_body, prompt_config)

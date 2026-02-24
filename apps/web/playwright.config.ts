@@ -1,8 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3010";
 const mockApiPort = Number(process.env.PLAYWRIGHT_MOCK_API_PORT ?? 4100);
-const webPort = Number(process.env.WEB_PORT ?? 3010);
+const webPort = Number(process.env.WEB_PORT ?? process.env.PLAYWRIGHT_WEB_PORT ?? 3310);
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${webPort}`;
+const reuseExistingServer = process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === "1";
 
 export default defineConfig({
   testDir: "./e2e/tests",
@@ -35,14 +36,16 @@ export default defineConfig({
     {
       command: `MOCK_API_PORT=${mockApiPort} node e2e/mock-api/server.mjs`,
       port: mockApiPort,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer,
       timeout: 120_000
     },
     {
-      command: `WEB_PORT=${webPort} API_URL=http://127.0.0.1:${mockApiPort} pnpm dev`,
+      command:
+        `WEB_PORT=${webPort} API_URL=http://127.0.0.1:${mockApiPort} pnpm build && ` +
+        `WEB_PORT=${webPort} API_URL=http://127.0.0.1:${mockApiPort} pnpm start`,
       port: webPort,
-      reuseExistingServer: !process.env.CI,
-      timeout: 120_000
+      reuseExistingServer,
+      timeout: 240_000
     }
   ]
 });

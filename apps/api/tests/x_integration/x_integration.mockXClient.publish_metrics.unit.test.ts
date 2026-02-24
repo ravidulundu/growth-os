@@ -7,132 +7,71 @@ import {
   resetXClientCacheForTests
 } from "../../src/modules/x_integration/x-client";
 
-function withEnv(
-  env: Partial<
-    Record<
-      | "NODE_ENV"
-      | "X_CLIENT_MODE"
-      | "X_SCOPES"
-      | "X_CLIENT_ID"
-      | "X_CLIENT_SECRET"
-      | "X_REDIRECT_URI"
-      | "X_API_BASE_URL"
-      | "X_OAUTH_BASE_URL"
-      | "X_API_MAX_RETRIES",
-      string | undefined
-    >
-  >,
-  run: () => Promise<void> | void
-) {
-  const previousNodeEnv = process.env.NODE_ENV;
-  const previousMode = process.env.X_CLIENT_MODE;
-  const previousScopes = process.env.X_SCOPES;
-  const previousClientId = process.env.X_CLIENT_ID;
-  const previousClientSecret = process.env.X_CLIENT_SECRET;
-  const previousRedirectUri = process.env.X_REDIRECT_URI;
-  const previousApiBaseUrl = process.env.X_API_BASE_URL;
-  const previousOAuthBaseUrl = process.env.X_OAUTH_BASE_URL;
-  const previousMaxRetries = process.env.X_API_MAX_RETRIES;
+type XClientEnvKey =
+  | "NODE_ENV"
+  | "X_CLIENT_MODE"
+  | "X_SCOPES"
+  | "X_CLIENT_ID"
+  | "X_CLIENT_SECRET"
+  | "X_REDIRECT_URI"
+  | "X_API_BASE_URL"
+  | "X_OAUTH_BASE_URL"
+  | "X_API_MAX_RETRIES";
 
-  if (env.NODE_ENV === undefined) {
-    delete process.env.NODE_ENV;
-  } else {
-    process.env.NODE_ENV = env.NODE_ENV;
-  }
+type XClientEnv = Partial<Record<XClientEnvKey, string | undefined>>;
+type XClientEnvSnapshot = Record<XClientEnvKey, string | undefined>;
 
-  if (env.X_CLIENT_MODE === undefined) {
-    delete process.env.X_CLIENT_MODE;
-  } else {
-    process.env.X_CLIENT_MODE = env.X_CLIENT_MODE;
+const X_CLIENT_ENV_KEYS: readonly XClientEnvKey[] = [
+  "NODE_ENV",
+  "X_CLIENT_MODE",
+  "X_SCOPES",
+  "X_CLIENT_ID",
+  "X_CLIENT_SECRET",
+  "X_REDIRECT_URI",
+  "X_API_BASE_URL",
+  "X_OAUTH_BASE_URL",
+  "X_API_MAX_RETRIES"
+];
+
+function setEnvValue(key: XClientEnvKey, value: string | undefined) {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
   }
 
-  if (env.X_SCOPES === undefined) {
-    delete process.env.X_SCOPES;
-  } else {
-    process.env.X_SCOPES = env.X_SCOPES;
-  }
-  if (env.X_CLIENT_ID === undefined) {
-    delete process.env.X_CLIENT_ID;
-  } else {
-    process.env.X_CLIENT_ID = env.X_CLIENT_ID;
-  }
-  if (env.X_CLIENT_SECRET === undefined) {
-    delete process.env.X_CLIENT_SECRET;
-  } else {
-    process.env.X_CLIENT_SECRET = env.X_CLIENT_SECRET;
-  }
-  if (env.X_REDIRECT_URI === undefined) {
-    delete process.env.X_REDIRECT_URI;
-  } else {
-    process.env.X_REDIRECT_URI = env.X_REDIRECT_URI;
-  }
-  if (env.X_API_BASE_URL === undefined) {
-    delete process.env.X_API_BASE_URL;
-  } else {
-    process.env.X_API_BASE_URL = env.X_API_BASE_URL;
-  }
-  if (env.X_OAUTH_BASE_URL === undefined) {
-    delete process.env.X_OAUTH_BASE_URL;
-  } else {
-    process.env.X_OAUTH_BASE_URL = env.X_OAUTH_BASE_URL;
-  }
-  if (env.X_API_MAX_RETRIES === undefined) {
-    delete process.env.X_API_MAX_RETRIES;
-  } else {
-    process.env.X_API_MAX_RETRIES = env.X_API_MAX_RETRIES;
-  }
+  process.env[key] = value;
+}
 
+function snapshotEnv(keys: readonly XClientEnvKey[]) {
+  const snapshot = {} as XClientEnvSnapshot;
+  for (const key of keys) {
+    snapshot[key] = process.env[key];
+  }
+  return snapshot;
+}
+
+function applyEnv(env: XClientEnv, keys: readonly XClientEnvKey[]) {
+  for (const key of keys) {
+    setEnvValue(key, env[key]);
+  }
+}
+
+function restoreEnv(snapshot: XClientEnvSnapshot, keys: readonly XClientEnvKey[]) {
+  for (const key of keys) {
+    setEnvValue(key, snapshot[key]);
+  }
+}
+
+function withEnv(env: XClientEnv, run: () => Promise<void> | void) {
+  const previousEnv = snapshotEnv(X_CLIENT_ENV_KEYS);
+
+  applyEnv(env, X_CLIENT_ENV_KEYS);
   resetXClientCacheForTests();
+
   const result = run();
 
   return Promise.resolve(result).finally(() => {
-    if (previousNodeEnv === undefined) {
-      delete process.env.NODE_ENV;
-    } else {
-      process.env.NODE_ENV = previousNodeEnv;
-    }
-
-    if (previousMode === undefined) {
-      delete process.env.X_CLIENT_MODE;
-    } else {
-      process.env.X_CLIENT_MODE = previousMode;
-    }
-
-    if (previousScopes === undefined) {
-      delete process.env.X_SCOPES;
-    } else {
-      process.env.X_SCOPES = previousScopes;
-    }
-    if (previousClientId === undefined) {
-      delete process.env.X_CLIENT_ID;
-    } else {
-      process.env.X_CLIENT_ID = previousClientId;
-    }
-    if (previousClientSecret === undefined) {
-      delete process.env.X_CLIENT_SECRET;
-    } else {
-      process.env.X_CLIENT_SECRET = previousClientSecret;
-    }
-    if (previousRedirectUri === undefined) {
-      delete process.env.X_REDIRECT_URI;
-    } else {
-      process.env.X_REDIRECT_URI = previousRedirectUri;
-    }
-    if (previousApiBaseUrl === undefined) {
-      delete process.env.X_API_BASE_URL;
-    } else {
-      process.env.X_API_BASE_URL = previousApiBaseUrl;
-    }
-    if (previousOAuthBaseUrl === undefined) {
-      delete process.env.X_OAUTH_BASE_URL;
-    } else {
-      process.env.X_OAUTH_BASE_URL = previousOAuthBaseUrl;
-    }
-    if (previousMaxRetries === undefined) {
-      delete process.env.X_API_MAX_RETRIES;
-    } else {
-      process.env.X_API_MAX_RETRIES = previousMaxRetries;
-    }
+    restoreEnv(previousEnv, X_CLIENT_ENV_KEYS);
     resetXClientCacheForTests();
   });
 }
@@ -144,6 +83,101 @@ function jsonResponse(body: unknown, status = 200) {
       "content-type": "application/json"
     }
   });
+}
+
+type FetchCall = {
+  url: string;
+  method: string;
+};
+
+function createRealFlowFetchImpl(fetchCalls: FetchCall[]): typeof fetch {
+  return async (input, init) => {
+    const url = String(input);
+    const method = init?.method?.toUpperCase() ?? "GET";
+    fetchCalls.push({ url, method });
+
+    if (url.endsWith("/oauth2/token")) {
+      return jsonResponse({
+        access_token: "real-access",
+        refresh_token: "real-refresh",
+        expires_in: 7200,
+        scope: "tweet.read tweet.write users.read offline.access"
+      });
+    }
+
+    if (url.endsWith("/users/me?user.fields=username")) {
+      return jsonResponse({
+        data: {
+          id: "12345",
+          username: "real_user"
+        }
+      });
+    }
+
+    if (url.includes("/users/12345/tweets?")) {
+      return jsonResponse({
+        data: [
+          { id: "t-1", text: "First post", created_at: new Date().toISOString() },
+          { id: "t-2", text: "Second post", created_at: new Date().toISOString() }
+        ]
+      });
+    }
+
+    if (url.endsWith("/tweets") && method === "POST") {
+      return jsonResponse({
+        data: {
+          id: "pub-1"
+        }
+      });
+    }
+
+    if (url.includes("/tweets/pub-1?tweet.fields=public_metrics")) {
+      return jsonResponse({
+        data: {
+          public_metrics: {
+            impression_count: 1234,
+            like_count: 120,
+            reply_count: 12,
+            retweet_count: 34,
+            quote_count: 5
+          }
+        }
+      });
+    }
+
+    return jsonResponse({ detail: "not found" }, 404);
+  };
+}
+
+async function assertRealClientFlow(client: RealXClient, fetchCalls: FetchCall[]) {
+  const token = await client.exchangeCodeForToken("code-1", { codeVerifier: "verifier-1" });
+  assert.equal(token.accessToken, "real-access");
+  assert.equal(token.refreshToken, "real-refresh");
+  const refreshedToken = await client.refreshToken(token.refreshToken);
+  assert.equal(refreshedToken.accessToken, "real-access");
+  assert.equal(refreshedToken.refreshToken, "real-refresh");
+
+  const profile = await client.getProfile(token.accessToken);
+  assert.equal(profile.xUserId, "12345");
+  assert.equal(profile.username, "real_user");
+
+  const timeline = await client.fetchTimeline(token.accessToken, 2);
+  assert.equal(timeline.length, 2);
+  const firstTimelinePost = timeline[0];
+  assert.ok(firstTimelinePost, "first timeline post should exist");
+  assert.equal(firstTimelinePost.xPostId, "t-1");
+
+  const publish = await client.publishPost(token.accessToken, "hello world");
+  assert.equal(publish.externalPostId, "pub-1");
+
+  const metrics = await client.fetchPostMetrics(token.accessToken, publish.externalPostId);
+  assert.equal(metrics.impressions, 1234);
+  assert.equal(metrics.likes, 120);
+  assert.equal(metrics.replies, 12);
+  assert.equal(metrics.reposts, 34);
+  assert.equal(metrics.quotes, 5);
+
+  assert.ok(fetchCalls.some((call) => call.url.endsWith("/oauth2/token")));
 }
 
 test("x_integration.mockXClient.publish_metrics.unit", async () => {
@@ -168,6 +202,9 @@ test("mock x client clamps timeline limits and reads scopes", async () => {
     const client = new MockXClient();
     const token = await client.exchangeCodeForToken("scope-code");
     assert.deepEqual(token.scopes, ["tweet.read", "users.read"]);
+    const refreshedToken = await client.refreshToken(token.refreshToken);
+    assert.deepEqual(refreshedToken.scopes, ["tweet.read", "users.read"]);
+    assert.notEqual(refreshedToken.accessToken, token.accessToken);
 
     const low = await client.fetchTimeline(token.accessToken, 0);
     const high = await client.fetchTimeline(token.accessToken, 999);
@@ -228,63 +265,8 @@ test("getXClient rejects unsupported or disallowed modes", async () => {
 });
 
 test("real x client handles token/profile/timeline/publish/metrics flow", async () => {
-  const fetchCalls: Array<{ url: string; method: string }> = [];
-  const fetchImpl: typeof fetch = async (input, init) => {
-    const url = String(input);
-    const method = init?.method?.toUpperCase() ?? "GET";
-    fetchCalls.push({ url, method });
-
-    if (url.endsWith("/oauth2/token")) {
-      return jsonResponse({
-        access_token: "real-access",
-        refresh_token: "real-refresh",
-        expires_in: 7200,
-        scope: "tweet.read tweet.write users.read offline.access"
-      });
-    }
-
-    if (url.endsWith("/users/me?user.fields=username")) {
-      return jsonResponse({
-        data: {
-          id: "12345",
-          username: "real_user"
-        }
-      });
-    }
-
-    if (url.includes("/users/12345/tweets?")) {
-      return jsonResponse({
-        data: [
-          { id: "t-1", text: "First post", created_at: new Date().toISOString() },
-          { id: "t-2", text: "Second post", created_at: new Date().toISOString() }
-        ]
-      });
-    }
-
-    if (url.endsWith("/tweets") && method === "POST") {
-      return jsonResponse({
-        data: {
-          id: "pub-1"
-        }
-      });
-    }
-
-    if (url.includes("/tweets/pub-1?tweet.fields=public_metrics")) {
-      return jsonResponse({
-        data: {
-          public_metrics: {
-            impression_count: 1234,
-            like_count: 120,
-            reply_count: 12,
-            retweet_count: 34,
-            quote_count: 5
-          }
-        }
-      });
-    }
-
-    return jsonResponse({ detail: "not found" }, 404);
-  };
+  const fetchCalls: FetchCall[] = [];
+  const fetchImpl = createRealFlowFetchImpl(fetchCalls);
 
   const client = new RealXClient({
     fetchImpl,
@@ -294,30 +276,7 @@ test("real x client handles token/profile/timeline/publish/metrics flow", async 
     clientSecret: "client-secret",
     redirectUri: "https://app.example.com/callback"
   });
-
-  const token = await client.exchangeCodeForToken("code-1", { codeVerifier: "verifier-1" });
-  assert.equal(token.accessToken, "real-access");
-  assert.equal(token.refreshToken, "real-refresh");
-
-  const profile = await client.getProfile(token.accessToken);
-  assert.equal(profile.xUserId, "12345");
-  assert.equal(profile.username, "real_user");
-
-  const timeline = await client.fetchTimeline(token.accessToken, 2);
-  assert.equal(timeline.length, 2);
-  assert.equal(timeline[0].xPostId, "t-1");
-
-  const publish = await client.publishPost(token.accessToken, "hello world");
-  assert.equal(publish.externalPostId, "pub-1");
-
-  const metrics = await client.fetchPostMetrics(token.accessToken, publish.externalPostId);
-  assert.equal(metrics.impressions, 1234);
-  assert.equal(metrics.likes, 120);
-  assert.equal(metrics.replies, 12);
-  assert.equal(metrics.reposts, 34);
-  assert.equal(metrics.quotes, 5);
-
-  assert.ok(fetchCalls.some((call) => call.url.endsWith("/oauth2/token")));
+  await assertRealClientFlow(client, fetchCalls);
 });
 
 test("real x client maps 429 to transient rate limit error", async () => {
@@ -414,6 +373,32 @@ test("real x client fails fast on invalid JSON payloads", async () => {
   await assert.rejects(() => client.getProfile("token"), {
     message: /invalid JSON response/i
   });
+});
+
+test("real x client refresh token keeps previous refresh token when omitted in response", async () => {
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    if (!url.endsWith("/oauth2/token")) {
+      return jsonResponse({ detail: "not found" }, 404);
+    }
+
+    return jsonResponse({
+      access_token: "refreshed-access",
+      expires_in: 3600,
+      scope: "tweet.read tweet.write users.read offline.access"
+    });
+  };
+  const client = new RealXClient({
+    fetchImpl,
+    oauthBaseUrl: "https://api.x.test/2/oauth2",
+    apiBaseUrl: "https://api.x.test/2",
+    clientId: "client-id",
+    redirectUri: "https://app.example.com/callback"
+  });
+
+  const refreshed = await client.refreshToken("existing-refresh");
+  assert.equal(refreshed.accessToken, "refreshed-access");
+  assert.equal(refreshed.refreshToken, "existing-refresh");
 });
 
 test("getXClient returns real client in real mode and validates env", async () => {

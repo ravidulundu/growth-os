@@ -1,0 +1,6 @@
+{
+  "permissions": {
+    "allow": ["Bash(head:*)", "Bash(git:*)"]
+  },
+  "outputStyle": "Learning"
+}

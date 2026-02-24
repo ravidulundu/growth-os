@@ -1,6 +1,1 @@
-#!/usr/bin/env sh
-if [ -f "$(dirname -- "$0")/_/husky.sh" ]; then
-  . "$(dirname -- "$0")/_/husky.sh"
-fi
-
 pnpm quality:gate:push

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { Logger } from "@nestjs/common";
 import { closePool, getPool } from "./pool";
 import { findRepoRoot } from "./repo-root";
@@ -16,22 +17,40 @@ async function ensureMigrationsTable() {
       applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
+  await pool.query(`
+    ALTER TABLE schema_migrations
+      ADD COLUMN IF NOT EXISTS checksum TEXT;
+  `);
 }
 
-async function appliedFiles(): Promise<Set<string>> {
+function fileChecksum(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+async function appliedFiles(): Promise<Map<string, string | null>> {
   const pool = getPool();
-  const result = await pool.query<{ file_name: string }>("SELECT file_name FROM schema_migrations");
-  return new Set(result.rows.map((row: { file_name: string }) => row.file_name));
+  const result = await pool.query<{ file_name: string; checksum: string | null }>(
+    "SELECT file_name, checksum FROM schema_migrations"
+  );
+  return new Map(
+    result.rows.map((row: { file_name: string; checksum: string | null }) => [
+      row.file_name,
+      row.checksum
+    ])
+  );
 }
 
-async function applyMigration(fileName: string, sql: string) {
+async function applyMigration(fileName: string, sql: string, checksum: string) {
   const pool = getPool();
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
     await client.query(sql);
-    await client.query("INSERT INTO schema_migrations(file_name) VALUES ($1)", [fileName]);
+    await client.query("INSERT INTO schema_migrations(file_name, checksum) VALUES ($1, $2)", [
+      fileName,
+      checksum
+    ]);
     await client.query("COMMIT");
   } catch (error) {
     try {
@@ -43,6 +62,19 @@ async function applyMigration(fileName: string, sql: string) {
   } finally {
     client.release();
   }
+}
+
+async function backfillMigrationChecksum(fileName: string, checksum: string) {
+  const pool = getPool();
+  await pool.query(
+    `
+      UPDATE schema_migrations
+      SET checksum = $2
+      WHERE file_name = $1
+        AND checksum IS NULL;
+    `,
+    [fileName, checksum]
+  );
 }
 
 async function main() {
@@ -57,12 +89,26 @@ async function main() {
   const alreadyApplied = await appliedFiles();
 
   for (const file of files) {
-    if (alreadyApplied.has(file)) {
+    const sql = fs.readFileSync(path.join(migrationsDir, file), "utf8");
+    const computedChecksum = fileChecksum(sql);
+    const storedChecksum = alreadyApplied.get(file);
+
+    if (storedChecksum === null) {
+      await backfillMigrationChecksum(file, computedChecksum);
+      Logger.log(`Backfilled checksum for ${file}`, "DBMigrate");
       continue;
     }
 
-    const sql = fs.readFileSync(path.join(migrationsDir, file), "utf8");
-    await applyMigration(file, sql);
+    if (typeof storedChecksum === "string") {
+      if (storedChecksum !== computedChecksum) {
+        throw new Error(
+          `Checksum mismatch for ${file}: expected ${storedChecksum}, got ${computedChecksum}. Migration file was modified after application.`
+        );
+      }
+      continue;
+    }
+
+    await applyMigration(file, sql, computedChecksum);
     Logger.log(`Applied migration: ${file}`, "DBMigrate");
   }
 

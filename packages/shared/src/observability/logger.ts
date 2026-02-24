@@ -17,6 +17,14 @@ type LogPayload = {
   error?: SerializedError;
 };
 
+type LogParams = {
+  level: LogLevel;
+  scope: string;
+  message: string;
+  metadata?: LogMeta;
+  error?: unknown;
+};
+
 function serializeError(error: unknown): SerializedError | undefined {
   if (!(error instanceof Error)) {
     return undefined;
@@ -38,7 +46,7 @@ function writePayload(payload: LogPayload) {
   process.stdout.write(line);
 }
 
-function log(level: LogLevel, scope: string, message: string, metadata?: LogMeta, error?: unknown) {
+function log({ level, scope, message, metadata, error }: LogParams) {
   writePayload({
     timestamp: new Date().toISOString(),
     level,
@@ -52,13 +60,13 @@ function log(level: LogLevel, scope: string, message: string, metadata?: LogMeta
 export function createLogger(scope: string) {
   return {
     info(message: string, metadata?: LogMeta) {
-      log("info", scope, message, metadata);
+      log({ level: "info", scope, message, metadata });
     },
     warn(message: string, metadata?: LogMeta, error?: unknown) {
-      log("warn", scope, message, metadata, error);
+      log({ level: "warn", scope, message, metadata, error });
     },
     error(message: string, error?: unknown, metadata?: LogMeta) {
-      log("error", scope, message, metadata, error);
+      log({ level: "error", scope, message, metadata, error });
     }
   };
 }

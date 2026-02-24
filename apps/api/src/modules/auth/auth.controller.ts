@@ -11,6 +11,7 @@ import {
   Req,
   Res
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { Public } from "../../shared/auth/public.decorator";
@@ -18,6 +19,7 @@ import {
   resolveAuthCookieSameSiteHeaderValue,
   resolveAuthCookieSecure
 } from "../../shared/auth/cookie-policy";
+import { getPool } from "../../shared/db/pool";
 import { resolveAppOrigins } from "../../shared/http/origin-utils";
 import { getBetterAuth } from "./better-auth";
 import { buildMagicLinkRequestResponse } from "./auth-response";
@@ -35,6 +37,11 @@ const verifySchema = z.object({
   callbackURL: z.string().url().optional(),
   newUserCallbackURL: z.string().url().optional(),
   errorCallbackURL: z.string().url().optional()
+});
+
+const waitlistSchema = z.object({
+  email: z.string().email(),
+  source: z.string().min(1).max(64).optional()
 });
 
 const LOCAL_REDIRECT_ORIGINS = [
@@ -176,48 +183,110 @@ export function requestAcceptsHtml(request: FastifyRequest) {
   return fetchMode === "navigate" || fetchDest === "document" || fetchDest === "iframe";
 }
 
+const DEFAULT_AUTH_ERROR_MESSAGE = "Authentication request failed";
+const BETTER_AUTH_ERROR_MAPPING: Record<string, { status: number; message: string }> = {
+  [`401:${DEFAULT_AUTH_ERROR_MESSAGE}`]: {
+    status: 401,
+    message: "Invalid or expired magic link token"
+  }
+};
+
+function normalizeWaitlistEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+function normalizeWaitlistSource(source: string | undefined) {
+  if (!source) {
+    return "landing";
+  }
+
+  return (
+    source
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, "_")
+      .slice(0, 64) || "landing"
+  );
+}
+
+async function persistWaitlistEntry(email: string, source: string) {
+  const result = await getPool().query<{ id: string }>(
+    `
+      INSERT INTO waitlist_entries (email, source)
+      VALUES ($1, $2)
+      ON CONFLICT (email) DO NOTHING
+      RETURNING id;
+    `,
+    [email, source]
+  );
+
+  return {
+    alreadyJoined: !result.rows[0]
+  };
+}
+
+function normalizeBetterAuthStatus(statusCode: unknown) {
+  if (typeof statusCode !== "number") {
+    return 500;
+  }
+  if (statusCode >= 300 && statusCode < 400) {
+    return 401;
+  }
+  if (statusCode >= 400 && statusCode < 600) {
+    return statusCode;
+  }
+  return 500;
+}
+
+function resolveBetterAuthMessage(error: { body?: { message?: unknown }; message?: unknown }) {
+  const bodyMessage = error.body?.message;
+  if (typeof bodyMessage === "string" && bodyMessage.trim()) {
+    return bodyMessage;
+  }
+
+  if (typeof error.message === "string" && error.message.trim()) {
+    return error.message;
+  }
+
+  return DEFAULT_AUTH_ERROR_MESSAGE;
+}
+
+function toMappedAuthError(status: number, message: string) {
+  return BETTER_AUTH_ERROR_MAPPING[`${status}:${message}`] ?? { status, message };
+}
+
+function toMappedHttpException(params: { status: number; message: string }) {
+  if (params.status === 500) {
+    return new InternalServerErrorException(params.message);
+  }
+
+  return new HttpException(params.message, params.status);
+}
+
 export function mapBetterAuthError(error: unknown): HttpException {
   if (error instanceof HttpException) {
     return error;
   }
 
   if (typeof error !== "object" || !error) {
-    return new InternalServerErrorException("Authentication request failed");
+    return new InternalServerErrorException(DEFAULT_AUTH_ERROR_MESSAGE);
   }
 
-  const maybeStatusCode = (error as { statusCode?: unknown }).statusCode;
-  const rawStatusCode = typeof maybeStatusCode === "number" ? maybeStatusCode : undefined;
-  const statusCode =
-    rawStatusCode === undefined
-      ? 500
-      : rawStatusCode >= 300 && rawStatusCode < 400
-        ? 401
-        : rawStatusCode >= 400 && rawStatusCode < 600
-          ? rawStatusCode
-          : 500;
-
-  const maybeBodyMessage = (error as { body?: { message?: unknown } }).body?.message;
-  const maybeMessage = (error as { message?: unknown }).message;
-  const message =
-    (typeof maybeBodyMessage === "string" && maybeBodyMessage.trim()) ||
-    (typeof maybeMessage === "string" && maybeMessage.trim()) ||
-    "Authentication request failed";
-
-  if (statusCode === 401 && message === "Authentication request failed") {
-    return new HttpException("Invalid or expired magic link token", statusCode);
-  }
-
-  if (statusCode === 500) {
-    return new InternalServerErrorException(message);
-  }
-
-  return new HttpException(message, statusCode);
+  const authError = error as {
+    statusCode?: unknown;
+    body?: { message?: unknown };
+    message?: unknown;
+  };
+  const status = normalizeBetterAuthStatus(authError.statusCode);
+  const message = resolveBetterAuthMessage(authError);
+  return toMappedHttpException(toMappedAuthError(status, message));
 }
 
 @Controller("auth")
 @Public()
 export class AuthController {
   @Post("sign-in/magic-link")
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   async requestMagicLink(@Body() body: unknown, @Req() request: FastifyRequest) {
     const parsed = requestSchema.safeParse(body);
     if (!parsed.success) {
@@ -228,6 +297,7 @@ export class AuthController {
   }
 
   @Get("magic-link/verify")
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   async verifyMagicLink(
     @Query() query: unknown,
     @Req() request: FastifyRequest,
@@ -239,6 +309,27 @@ export class AuthController {
     }
 
     return this.verifyMagicLinkWithBetterAuth(parsed.data, request, response);
+  }
+
+  @Post("waitlist")
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
+  async joinWaitlist(@Body() body: unknown) {
+    const parsed = waitlistSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+
+    const normalizedEmail = normalizeWaitlistEmail(parsed.data.email);
+    const normalizedSource = normalizeWaitlistSource(parsed.data.source);
+    const result = await persistWaitlistEntry(normalizedEmail, normalizedSource);
+
+    return {
+      ok: true,
+      alreadyJoined: result.alreadyJoined,
+      message: result.alreadyJoined
+        ? "You are already on the waitlist."
+        : "You have been added to the waitlist."
+    };
   }
 
   private async requestMagicLinkWithBetterAuth(

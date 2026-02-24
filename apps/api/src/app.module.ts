@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
-import { APP_GUARD } from "@nestjs/core";
+import { APP_FILTER, APP_GUARD } from "@nestjs/core";
+import { ThrottlerModule } from "@nestjs/throttler";
 import { AnalyticsController } from "./modules/analytics/analytics.controller";
 import { AnalyticsService } from "./modules/analytics/analytics.service";
 import { AuthController } from "./modules/auth/auth.controller";
@@ -16,9 +17,23 @@ import { XIntegrationController } from "./modules/x_integration/x-integration.co
 import { XIntegrationService } from "./modules/x_integration/x-integration.service";
 import { SessionAuthGuard } from "./shared/auth/session-auth.guard";
 import { HealthController } from "./shared/health/health.controller";
+import { FastifyThrottlerGuard } from "./shared/rate-limit/fastify-throttler.guard";
+import { DataRetentionController } from "./shared/retention/data-retention.controller";
+import { DataRetentionService } from "./shared/retention/data-retention.service";
+import { SentryExceptionFilter } from "./shared/telemetry/sentry-exception.filter";
 
 @Module({
-  imports: [],
+  imports: [
+    ThrottlerModule.forRoot({
+      throttlers: [
+        {
+          name: "default",
+          ttl: 60_000,
+          limit: 60
+        }
+      ]
+    })
+  ],
   controllers: [
     HealthController,
     AuthController,
@@ -28,9 +43,18 @@ import { HealthController } from "./shared/health/health.controller";
     StyleController,
     GenerationController,
     SchedulingController,
-    AnalyticsController
+    AnalyticsController,
+    DataRetentionController
   ],
   providers: [
+    {
+      provide: APP_FILTER,
+      useClass: SentryExceptionFilter
+    },
+    {
+      provide: APP_GUARD,
+      useClass: FastifyThrottlerGuard
+    },
     {
       provide: APP_GUARD,
       useClass: SessionAuthGuard
@@ -40,7 +64,8 @@ import { HealthController } from "./shared/health/health.controller";
     BillingService,
     GenerationService,
     SchedulingService,
-    AnalyticsService
+    AnalyticsService,
+    DataRetentionService
   ]
 })
 export class AppModule {}

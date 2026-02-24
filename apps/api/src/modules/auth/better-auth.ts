@@ -1,6 +1,5 @@
-import { Logger } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
-import nodemailer from "nodemailer";
+import { sendMagicLinkEmail } from "../../shared/email/email.service";
 import {
   resolveAuthCookieSameSiteLowercase,
   resolveAuthCookieSecure
@@ -49,14 +48,6 @@ type BetterAuthApi = {
 type BetterAuthInstance = {
   api: BetterAuthApi;
 };
-
-function canLogMagicLinkToConsole() {
-  return process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
-}
-
-function canLogFullMagicLinkToConsole() {
-  return (process.env.AUTH_DEV_LOG_MAGIC_LINK_URL ?? "false").toLowerCase() === "true";
-}
 
 function resolveAuthSecret() {
   const configured =
@@ -153,61 +144,162 @@ function buildLoginVerificationUrl(rawMagicLinkUrl: string) {
   return webLoginUrl.toString();
 }
 
-async function sendMagicLink(data: { email: string; url: string }) {
-  const deliveryUrl = buildLoginVerificationUrl(data.url);
-  const smtpHost = process.env.SMTP_HOST?.trim();
-  if (!smtpHost) {
-    if (!canLogMagicLinkToConsole()) {
-      throw new Error("Magic link delivery is not configured");
+function resolveMagicLinkMaxRequestsPerHour() {
+  const maxRequestsRaw = Number(process.env.AUTH_MAGIC_LINK_MAX_REQUESTS_PER_HOUR ?? 5);
+  return Number.isFinite(maxRequestsRaw) && maxRequestsRaw > 0 ? maxRequestsRaw : 5;
+}
+
+function buildUserConfig() {
+  return {
+    modelName: "users",
+    fields: {
+      createdAt: "created_at",
+      updatedAt: "updated_at",
+      emailVerified: "email_verified",
+      name: "display_name",
+      image: "avatar_url"
+    },
+    additionalFields: {
+      emailHash: {
+        type: "string" as const,
+        fieldName: "email_hash",
+        required: true,
+        input: false,
+        returned: false
+      }
     }
+  };
+}
 
-    if (canLogFullMagicLinkToConsole()) {
-      Logger.log(`[auth] dev magic link for ${data.email}: ${deliveryUrl}`, "BetterAuth");
-    } else {
-      Logger.log(
-        `[auth] dev magic link generated for ${data.email}. Set AUTH_DEV_LOG_MAGIC_LINK_URL=true to print full URL.`,
-        "BetterAuth"
-      );
+function buildSessionConfig() {
+  return {
+    modelName: "better_auth_sessions",
+    fields: {
+      createdAt: "created_at",
+      updatedAt: "updated_at",
+      userId: "user_id",
+      expiresAt: "expires_at",
+      ipAddress: "ip_address",
+      userAgent: "user_agent"
+    },
+    expiresIn: 60 * 60 * 24 * 30,
+    updateAge: 60 * 60
+  };
+}
+
+function buildAccountConfig() {
+  return {
+    modelName: "better_auth_accounts",
+    fields: {
+      createdAt: "created_at",
+      updatedAt: "updated_at",
+      providerId: "provider_id",
+      accountId: "account_id",
+      userId: "user_id",
+      accessToken: "access_token",
+      refreshToken: "refresh_token",
+      idToken: "id_token",
+      accessTokenExpiresAt: "access_token_expires_at",
+      refreshTokenExpiresAt: "refresh_token_expires_at"
     }
-    return;
-  }
+  };
+}
 
-  const smtpPortRaw = Number(process.env.SMTP_PORT ?? 587);
-  const smtpPort = Number.isFinite(smtpPortRaw) && smtpPortRaw > 0 ? smtpPortRaw : 587;
-  const smtpUser = process.env.SMTP_USER;
-  const smtpPass = process.env.SMTP_PASS;
-  const from = process.env.MAGIC_LINK_FROM_EMAIL ?? "no-reply@example.com";
-  const transporter = nodemailer.createTransport({
-    host: smtpHost,
-    port: smtpPort,
-    secure: false,
-    auth: smtpUser && smtpPass ? { user: smtpUser, pass: smtpPass } : undefined
-  });
+function buildVerificationConfig() {
+  return {
+    modelName: "better_auth_verifications",
+    fields: {
+      createdAt: "created_at",
+      updatedAt: "updated_at",
+      expiresAt: "expires_at"
+    }
+  };
+}
 
-  await transporter
-    .sendMail({
-      from,
-      to: data.email,
-      subject: "Your Growth OS magic link",
-      text: `Use this link to sign in: ${deliveryUrl}`
+function buildAdvancedConfig() {
+  return {
+    cookies: {
+      sessionToken: {
+        name: "session_token",
+        attributes: {
+          httpOnly: true,
+          secure: resolveAuthCookieSecure(),
+          sameSite: resolveAuthCookieSameSiteLowercase(),
+          path: "/"
+        }
+      }
+    }
+  };
+}
+
+function buildDatabaseHooks() {
+  return {
+    user: {
+      create: {
+        before: async (user: Record<string, unknown>) => {
+          const emailValue = String(user.email ?? "");
+          const generatedId =
+            typeof user.id === "string" && isUuid(user.id) ? user.id : randomUUID();
+          const derivedName =
+            typeof user.name === "string" && user.name.trim().length > 0
+              ? user.name.trim()
+              : emailValue.split("@")[0] || "user";
+          return {
+            data: {
+              ...user,
+              id: generatedId,
+              name: derivedName,
+              emailHash: computeEmailHash(emailValue)
+            }
+          };
+        }
+      },
+      update: {
+        before: async (user: Record<string, unknown>) => {
+          if (!user.email) {
+            return;
+          }
+
+          const emailValue = String(user.email);
+          return {
+            data: {
+              ...user,
+              emailHash: computeEmailHash(emailValue)
+            }
+          };
+        }
+      }
+    }
+  };
+}
+
+function buildEmailConfig() {
+  return {
+    sendMagicLink: async ({ email, url }: { email: string; url: string }) => {
+      const deliveryUrl = buildLoginVerificationUrl(url);
+      await sendMagicLinkEmail({ email, deliveryUrl, logContext: "BetterAuth" });
+    }
+  };
+}
+
+type MagicLinkPluginFactory = (typeof import("better-auth/plugins/magic-link"))["magicLink"];
+
+function buildPlugins(params: {
+  magicLink: MagicLinkPluginFactory;
+  maxRequestsPerHour: number;
+  emailConfig: ReturnType<typeof buildEmailConfig>;
+}) {
+  return [
+    params.magicLink({
+      expiresIn: 60 * 15,
+      storeToken: "hashed",
+      rateLimit: {
+        window: 60 * 60,
+        max: params.maxRequestsPerHour
+      },
+      sendMagicLink: params.emailConfig.sendMagicLink
     })
-    .then((info) => {
-      const responseText =
-        typeof info.response === "string" && info.response.trim().length > 0
-          ? info.response
-          : info.messageId;
-      Logger.log(
-        `[auth] magic link email accepted by SMTP for ${data.email} (${responseText ?? "no-response"})`,
-        "BetterAuth"
-      );
-    })
-    .catch((error) => {
-      Logger.warn(
-        `[auth] magic link email send failed for ${data.email}: ${error instanceof Error ? error.message : String(error)}`,
-        "BetterAuth"
-      );
-      throw error;
-    });
+  ];
 }
 
 let authInstancePromise: Promise<BetterAuthInstance> | null = null;
@@ -218,140 +310,29 @@ async function createBetterAuthInstance(): Promise<BetterAuthInstance> {
     import("better-auth/plugins/magic-link")
   ]);
 
-  const pool = getPool();
-  const maxRequestsRaw = Number(process.env.AUTH_MAGIC_LINK_MAX_REQUESTS_PER_HOUR ?? 5);
-  const maxRequests = Number.isFinite(maxRequestsRaw) && maxRequestsRaw > 0 ? maxRequestsRaw : 5;
-
+  const emailConfig = buildEmailConfig();
   const auth = betterAuth({
     baseURL: resolveAuthBaseUrl(),
     basePath: "/auth",
     disabledPaths: ["/magic-link/request"],
     secret: resolveAuthSecret(),
-    database: pool,
+    database: getPool(),
     trustedOrigins: resolveTrustedOrigins(),
     useSecureCookies: resolveAuthCookieSecure(),
-    user: {
-      modelName: "users",
-      fields: {
-        createdAt: "created_at",
-        updatedAt: "updated_at",
-        emailVerified: "email_verified",
-        name: "display_name",
-        image: "avatar_url"
-      },
-      additionalFields: {
-        emailHash: {
-          type: "string",
-          fieldName: "email_hash",
-          required: true,
-          input: false,
-          returned: false
-        }
-      }
-    },
-    session: {
-      modelName: "better_auth_sessions",
-      fields: {
-        createdAt: "created_at",
-        updatedAt: "updated_at",
-        userId: "user_id",
-        expiresAt: "expires_at",
-        ipAddress: "ip_address",
-        userAgent: "user_agent"
-      },
-      expiresIn: 60 * 60 * 24 * 30,
-      updateAge: 60 * 60
-    },
-    account: {
-      modelName: "better_auth_accounts",
-      fields: {
-        createdAt: "created_at",
-        updatedAt: "updated_at",
-        providerId: "provider_id",
-        accountId: "account_id",
-        userId: "user_id",
-        accessToken: "access_token",
-        refreshToken: "refresh_token",
-        idToken: "id_token",
-        accessTokenExpiresAt: "access_token_expires_at",
-        refreshTokenExpiresAt: "refresh_token_expires_at"
-      }
-    },
-    verification: {
-      modelName: "better_auth_verifications",
-      fields: {
-        createdAt: "created_at",
-        updatedAt: "updated_at",
-        expiresAt: "expires_at"
-      }
-    },
-    advanced: {
-      cookies: {
-        sessionToken: {
-          name: "session_token",
-          attributes: {
-            httpOnly: true,
-            secure: resolveAuthCookieSecure(),
-            sameSite: resolveAuthCookieSameSiteLowercase(),
-            path: "/"
-          }
-        }
-      }
-    },
-    databaseHooks: {
-      user: {
-        create: {
-          before: async (user) => {
-            const emailValue = String(user.email ?? "");
-            const generatedId =
-              typeof user.id === "string" && isUuid(user.id) ? user.id : randomUUID();
-            const derivedName =
-              typeof user.name === "string" && user.name.trim().length > 0
-                ? user.name.trim()
-                : emailValue.split("@")[0] || "user";
-            return {
-              data: {
-                ...user,
-                id: generatedId,
-                name: derivedName,
-                emailHash: computeEmailHash(emailValue)
-              }
-            };
-          }
-        },
-        update: {
-          before: async (user) => {
-            if (!user.email) {
-              return;
-            }
-
-            const emailValue = String(user.email);
-            return {
-              data: {
-                ...user,
-                emailHash: computeEmailHash(emailValue)
-              }
-            };
-          }
-        }
-      }
-    },
-    plugins: [
-      magicLink({
-        expiresIn: 60 * 15,
-        storeToken: "hashed",
-        rateLimit: {
-          window: 60 * 60,
-          max: maxRequests
-        },
-        sendMagicLink: async ({ email, url }) => {
-          await sendMagicLink({ email, url });
-        }
-      })
-    ]
+    user: buildUserConfig(),
+    session: buildSessionConfig(),
+    account: buildAccountConfig(),
+    verification: buildVerificationConfig(),
+    advanced: buildAdvancedConfig(),
+    databaseHooks: buildDatabaseHooks(),
+    plugins: buildPlugins({
+      magicLink,
+      maxRequestsPerHour: resolveMagicLinkMaxRequestsPerHour(),
+      emailConfig
+    })
   });
 
-  return auth as BetterAuthInstance;
+  return auth as unknown as BetterAuthInstance;
 }
 
 export async function getBetterAuth() {
