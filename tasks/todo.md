@@ -1,5 +1,48 @@
 # Todo
 
+## Next Plan (Next.js allowedDevOrigins Warning Fix)
+
+- [x] `apps/web/next.config.mjs` dosyasina `allowedDevOrigins` ekle.
+- [x] Web tarafinda lint + typecheck + build ile degisikligi dogrula.
+- [x] Sonucu kisa notla dokumante et.
+
+### Review (Next.js allowedDevOrigins Warning Fix)
+
+- `apps/web/next.config.mjs` icine `allowedDevOrigins` eklendi:
+  - `http://localhost:3000`
+  - `http://127.0.0.1:3000`
+  - `http://localhost:3010`
+  - `http://127.0.0.1:3010`
+- Dogrulama:
+  - `corepack pnpm lint -- apps/web/next.config.mjs`
+  - `corepack pnpm --filter @growth-os/web typecheck`
+  - `corepack pnpm --filter @growth-os/web build`
+
+## Next Plan (PR Thread Sweep - PR #3)
+
+- [x] Unresolved 21 review thread yorumunu tek tek teknik olarak sınıflandır (bug, risk, info).
+- [x] Aksiyon gerektiren thread'ler için kod/migration/ci düzeltmelerini uygula.
+- [x] Gerekli yerlerde davranış koruyarak güvenlik/kararlılık iyileştirmeleri ekle.
+- [x] Lint + typecheck + ilgili build/test komutlarıyla doğrula.
+- [x] Her thread'e teknik cevap bırakıp `resolved` olarak işaretle.
+- [x] Tur sonunda `pnpm pr:review-check` ile unresolved=0 doğrula.
+
+### Review (PR Thread Sweep - PR #3)
+
+- 21 unresolved thread'in tamamı yorumlanıp `resolved` yapıldı.
+- Kritik fixler: Husky hook bootstrap, pool env parse guard, trusted proxy rate-limit tracker, checksum backfill, duplicate migration numbering fix, PostHog batch/shutdown, onboarding workspace membership doğrulaması, CI health=200 gate, worker token-refresh race recovery.
+- Deterministik dependency politikası için `apps/api` ve `apps/web` package version spec'leri caret yerine exact version'a çekildi.
+- Doğrulama komutları:
+  - `corepack pnpm lint -- ...` (değişen dosyalar)
+  - `corepack pnpm typecheck`
+  - `corepack pnpm --filter @growth-os/api build`
+  - `corepack pnpm --filter @growth-os/web build`
+  - `corepack pnpm --filter @growth-os/worker build`
+  - `corepack pnpm --filter @growth-os/api test:unit`
+  - `corepack pnpm --filter @growth-os/worker test`
+  - `corepack pnpm --filter @growth-os/api test:integration`
+  - `corepack pnpm -s run pr:review-check`
+
 ## Plan
 
 - [x] Coverage kapsamını mevcut durumdan çıkar (tek dosya yerine proje çekirdeği).

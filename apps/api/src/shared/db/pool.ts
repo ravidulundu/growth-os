@@ -2,16 +2,24 @@ import { Pool } from "pg";
 
 let pool: Pool | undefined;
 
+function envInt(name: string, fallback: number, minValue = 0) {
+  const parsed = Number.parseInt(process.env[name] ?? "", 10);
+  if (!Number.isFinite(parsed) || parsed < minValue) {
+    return fallback;
+  }
+  return parsed;
+}
+
 export function getPool() {
   if (!pool) {
     const connectionString =
       process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:55432/growth_os";
     pool = new Pool({
       connectionString,
-      max: parseInt(process.env.PG_POOL_MAX ?? "20", 10),
-      idleTimeoutMillis: parseInt(process.env.PG_POOL_IDLE_TIMEOUT_MS ?? "30000", 10),
-      connectionTimeoutMillis: parseInt(process.env.PG_POOL_CONNECTION_TIMEOUT_MS ?? "10000", 10),
-      statement_timeout: parseInt(process.env.PG_STATEMENT_TIMEOUT_MS ?? "30000", 10)
+      max: envInt("PG_POOL_MAX", 20, 1),
+      idleTimeoutMillis: envInt("PG_POOL_IDLE_TIMEOUT_MS", 30_000),
+      connectionTimeoutMillis: envInt("PG_POOL_CONNECTION_TIMEOUT_MS", 10_000),
+      statement_timeout: envInt("PG_STATEMENT_TIMEOUT_MS", 30_000)
     });
   }
 

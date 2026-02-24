@@ -18,6 +18,12 @@ function resolveProxyTarget() {
 const nextConfig = {
   reactStrictMode: true,
   typedRoutes: true,
+  allowedDevOrigins: [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3010",
+    "http://127.0.0.1:3010"
+  ],
   async rewrites() {
     const normalizedBase = resolveProxyTarget();
     return [

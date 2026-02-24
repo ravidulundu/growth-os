@@ -4,13 +4,16 @@ import { ThrottlerGuard } from "@nestjs/throttler";
 @Injectable()
 export class FastifyThrottlerGuard extends ThrottlerGuard {
   protected async getTracker(req: Record<string, unknown>): Promise<string> {
-    const headers = req.headers as Record<string, unknown> | undefined;
-    const forwardedFor = headers?.["x-forwarded-for"];
-    const fromForwarded = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
-    const normalizedForwarded =
-      typeof fromForwarded === "string" ? fromForwarded.split(",")[0]?.trim() : "";
-    if (normalizedForwarded) {
-      return normalizedForwarded;
+    const trustProxy = process.env.RATE_LIMIT_TRUST_PROXY === "true";
+    if (trustProxy) {
+      const headers = req.headers as Record<string, unknown> | undefined;
+      const forwardedFor = headers?.["x-forwarded-for"];
+      const fromForwarded = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
+      const normalizedForwarded =
+        typeof fromForwarded === "string" ? fromForwarded.split(",")[0]?.trim() : "";
+      if (normalizedForwarded) {
+        return normalizedForwarded;
+      }
     }
 
     const requestIp = typeof req.ip === "string" ? req.ip : "";

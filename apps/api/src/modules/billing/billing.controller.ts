@@ -33,6 +33,15 @@ const portalSessionSchema = z.object({
   returnUrl: z.string().url().optional()
 });
 
+function resolveStripeSignatureHeader(header: string | string[] | undefined) {
+  const candidate = Array.isArray(header) ? header[0] : header;
+  if (typeof candidate !== "string") {
+    return undefined;
+  }
+  const normalized = candidate.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
 @Controller("billing")
 export class BillingController {
   constructor(private readonly billingService: BillingService) {}
@@ -77,7 +86,7 @@ export class BillingController {
     @Req() request: RawBodyRequest<FastifyRequest>,
     @Headers("stripe-signature") signatureHeader: string | string[] | undefined
   ) {
-    const signature = Array.isArray(signatureHeader) ? signatureHeader[0] : signatureHeader;
+    const signature = resolveStripeSignatureHeader(signatureHeader);
     return this.billingService.handleStripeWebhook(request.rawBody, signature);
   }
 }

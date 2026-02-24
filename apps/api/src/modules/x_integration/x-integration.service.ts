@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  HttpException,
+  HttpStatus,
   Injectable,
   Logger,
   NotFoundException,
@@ -53,6 +55,15 @@ type CompetitorTimelineResult = {
 const competitorTimelineMinLimit = 5;
 const competitorTimelineMaxLimit = 20;
 const competitorMetricsFetchLimit = 8;
+const defaultCompetitorIngestMaxPerHour = 12;
+
+function envPositiveInt(name: string, fallback: number) {
+  const parsed = Number.parseInt(process.env[name] ?? "", 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback;
+  }
+  return parsed;
+}
 
 function normalizeCompetitorHandle(handle: string) {
   return handle.trim().replace(/^@+/, "").toLowerCase();
@@ -82,6 +93,31 @@ export class XIntegrationService {
 
   protected xClient() {
     return getXClient();
+  }
+
+  private competitorIngestMaxPerHour() {
+    return envPositiveInt("COMPETITOR_INGEST_MAX_PER_HOUR", defaultCompetitorIngestMaxPerHour);
+  }
+
+  private async assertCompetitorIngestBudget(workspaceId: string) {
+    const limit = this.competitorIngestMaxPerHour();
+    const result = await this.dbPool().query<{ ingest_count: number }>(
+      `
+        SELECT COUNT(*)::int AS ingest_count
+        FROM audit_logs
+        WHERE workspace_id = $1
+          AND action = 'analytics.competitor_ingest'
+          AND created_at >= now() - interval '1 hour';
+      `,
+      [workspaceId]
+    );
+
+    if ((result.rows[0]?.ingest_count ?? 0) >= limit) {
+      throw new HttpException(
+        "Competitor ingest budget exceeded for this workspace",
+        HttpStatus.TOO_MANY_REQUESTS
+      );
+    }
   }
 
   async startConnect(workspaceId: string) {
@@ -570,6 +606,7 @@ export class XIntegrationService {
     }
 
     const boundedLimit = boundedCompetitorTimelineLimit(limit);
+    await this.assertCompetitorIngestBudget(workspaceId);
     const accessToken = await this.resolveWorkspaceAccessToken(workspaceId);
     const timeline = await this.xClient().fetchTimelineByHandle(
       accessToken,

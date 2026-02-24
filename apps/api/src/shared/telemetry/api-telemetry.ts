@@ -36,6 +36,8 @@ const logger = createLogger("ApiTelemetry");
 const piiKeyPattern = /(email|token|secret|password|cookie|authorization|auth|session|key)/i;
 const maxSanitizeDepth = 3;
 const defaultPosthogHost = "https://app.posthog.com";
+const defaultPosthogFlushAt = 20;
+const defaultPosthogFlushIntervalMs = 10_000;
 const defaultEventSampleRate = 0.2;
 const defaultCriticalSampleRate = 1;
 const defaultDailyCap = 2000;
@@ -63,6 +65,14 @@ function parseUnitFloat(value: string | undefined, fallback: number) {
 function parsePositiveInt(value: string | undefined, fallback: number) {
   const parsed = Number.parseInt(value ?? "", 10);
   if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback;
+  }
+  return parsed;
+}
+
+function parseNonNegativeInt(value: string | undefined, fallback: number) {
+  const parsed = Number.parseInt(value ?? "", 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
     return fallback;
   }
   return parsed;
@@ -154,10 +164,15 @@ function resolvePosthogClient() {
   }
 
   const host = normalizeEnv(process.env.POSTHOG_HOST) ?? defaultPosthogHost;
+  const flushAt = parsePositiveInt(process.env.POSTHOG_FLUSH_AT, defaultPosthogFlushAt);
+  const flushInterval = parseNonNegativeInt(
+    process.env.POSTHOG_FLUSH_INTERVAL_MS,
+    defaultPosthogFlushIntervalMs
+  );
   posthogClient = new PostHog(apiKey, {
     host,
-    flushAt: 1,
-    flushInterval: 0,
+    flushAt,
+    flushInterval,
     requestTimeout: 3000
   });
   return posthogClient;
@@ -278,5 +293,17 @@ export function captureApiException(exception: unknown, context: TelemetryExcept
     });
   } catch (error) {
     logger.warn("failed to capture sentry exception", undefined, error);
+  }
+}
+
+export async function shutdownApiTelemetry() {
+  if (!posthogClient) {
+    return;
+  }
+
+  try {
+    await posthogClient.shutdown();
+  } catch (error) {
+    logger.warn("failed to shutdown posthog client", undefined, error);
   }
 }

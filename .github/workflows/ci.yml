@@ -162,13 +162,13 @@ jobs:
           health_status=""
           for _ in $(seq 1 30); do
             health_status=$(curl -sS -o /dev/null -w "%{http_code}" "http://localhost:4000/health" || true)
-            if [ "${health_status}" = "200" ] || [ "${health_status}" = "503" ]; then
+            if [ "${health_status}" = "200" ]; then
               break
             fi
             sleep 1
           done
 
-          if [ "${health_status}" != "200" ] && [ "${health_status}" != "503" ]; then
+          if [ "${health_status}" != "200" ]; then
             echo "Health endpoint did not become reachable (last status: ${health_status})"
             exit 1
           fi

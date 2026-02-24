@@ -1073,6 +1073,61 @@ async function fetchAccessTokenForPublish(
   return decryptSecret(tokenRow.access_token_encrypted);
 }
 
+async function fetchLatestAccessTokenForPublish(
+  client: PoolClient,
+  accountId: string,
+  workspaceId: string
+) {
+  const tokenResult = await client.query<{ access_token_encrypted: string }>(
+    `
+      SELECT xt.access_token_encrypted
+      FROM x_tokens xt
+      JOIN x_accounts xa ON xa.id = xt.account_id
+      WHERE xt.account_id = $1
+        AND xa.workspace_id = $2
+        AND xt.revoked_at IS NULL
+      ORDER BY xt.created_at DESC
+      LIMIT 1;
+    `,
+    [accountId, workspaceId]
+  );
+
+  const tokenRow = tokenResult.rows[0];
+  if (!tokenRow) {
+    throw Object.assign(new Error("X access token not found"), {
+      code: "TOKEN_NOT_FOUND",
+      transient: false
+    });
+  }
+
+  return decryptSecret(tokenRow.access_token_encrypted);
+}
+
+async function publishWithLatestAccessTokenAfterRefresh(params: {
+  client: PoolClient;
+  runtime: PublishRuntimeContext;
+  contentText: string;
+  refreshedAccessToken: string;
+}) {
+  const latestAccessToken = await fetchLatestAccessTokenForPublish(
+    params.client,
+    params.runtime.activeAccountId,
+    params.runtime.activeWorkspaceId
+  );
+  if (latestAccessToken === params.refreshedAccessToken) {
+    return null;
+  }
+
+  try {
+    return await xClient.publishPost(latestAccessToken, params.contentText);
+  } catch (error) {
+    if (!isAuthFailedError(error)) {
+      throw error;
+    }
+    return null;
+  }
+}
+
 async function lockActiveTokenForRefresh(
   client: PoolClient,
   accountId: string,
@@ -1220,14 +1275,21 @@ async function publishPostWithRefreshRetry(params: {
     try {
       return await xClient.publishPost(refreshedAccessToken, params.contentText);
     } catch (retryError) {
-      if (isAuthFailedError(retryError)) {
-        throw createWorkerXError(
-          "X authentication failed after token refresh",
-          "AUTH_FAILED",
-          false
-        );
+      if (!isAuthFailedError(retryError)) {
+        throw retryError;
       }
-      throw retryError;
+
+      const raceRecoveryPublish = await publishWithLatestAccessTokenAfterRefresh({
+        client: params.client,
+        runtime: params.runtime,
+        contentText: params.contentText,
+        refreshedAccessToken
+      });
+      if (raceRecoveryPublish) {
+        return raceRecoveryPublish;
+      }
+
+      throw createWorkerXError("X authentication failed after token refresh", "AUTH_FAILED", false);
     }
   }
 }

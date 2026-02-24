@@ -64,6 +64,19 @@ async function applyMigration(fileName: string, sql: string, checksum: string) {
   }
 }
 
+async function backfillMigrationChecksum(fileName: string, checksum: string) {
+  const pool = getPool();
+  await pool.query(
+    `
+      UPDATE schema_migrations
+      SET checksum = $2
+      WHERE file_name = $1
+        AND checksum IS NULL;
+    `,
+    [fileName, checksum]
+  );
+}
+
 async function main() {
   const root = findRepoRoot();
   const migrationsDir = path.join(root, "packages", "db", "migrations");
@@ -81,10 +94,8 @@ async function main() {
     const storedChecksum = alreadyApplied.get(file);
 
     if (storedChecksum === null) {
-      Logger.warn(
-        `Checksum missing for ${file}. Migration was applied before checksum tracking and will not be verified.`,
-        "DBMigrate"
-      );
+      await backfillMigrationChecksum(file, computedChecksum);
+      Logger.log(`Backfilled checksum for ${file}`, "DBMigrate");
       continue;
     }
 

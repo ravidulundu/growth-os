@@ -3,6 +3,7 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException
 } from "@nestjs/common";
@@ -32,6 +33,7 @@ const GENERATION_EVENT_TYPE = "content.generate";
 const STRIPE_SUBSCRIPTION_ENTITLED_STATUSES = new Set(["trialing", "active", "past_due", "unpaid"]);
 
 const CHECKOUT_PLAN_KEYS: readonly CheckoutPlanKey[] = ["creator", "growth", "team"];
+const billingLogger = new Logger("BillingService");
 const STRIPE_PRICE_ENV_ALIASES: Record<PlanKey, readonly string[]> = {
   mvp0: ["STRIPE_PRICE_ID_MVP0", "STRIPE_PRICE_MVP0_IDS"],
   free: ["STRIPE_PRICE_ID_FREE", "STRIPE_PRICE_FREE_IDS"],
@@ -906,8 +908,9 @@ export class BillingService {
 
     try {
       await client.query("BEGIN");
-      const shouldProcess = await this.registerStripeWebhookEvent(client, event);
-      if (!shouldProcess) {
+      const isNewEvent = await this.registerStripeWebhookEvent(client, event);
+      const isDuplicateEvent = !isNewEvent;
+      if (isDuplicateEvent) {
         await client.query("COMMIT");
         return true;
       }
@@ -916,6 +919,7 @@ export class BillingService {
       await client.query("COMMIT");
       return false;
     } catch (error) {
+      billingLogger.warn(`stripe webhook processing failed for event ${event.id} (${event.type})`);
       try {
         await client.query("ROLLBACK");
       } catch {

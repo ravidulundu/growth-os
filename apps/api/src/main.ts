@@ -9,7 +9,11 @@ import { loadEnv } from "./shared/db/env";
 import { closePool } from "./shared/db/pool";
 import { getRequestId, requestContextStorage } from "./shared/context/request-context";
 import { resolveAppOrigins } from "./shared/http/origin-utils";
-import { captureApiException, initApiTelemetry } from "./shared/telemetry/api-telemetry";
+import {
+  captureApiException,
+  initApiTelemetry,
+  shutdownApiTelemetry
+} from "./shared/telemetry/api-telemetry";
 
 const LOCAL_DEV_ORIGINS = [
   "http://localhost:3000",
@@ -98,6 +102,7 @@ async function bootstrap() {
   });
 
   fastifyInstance.addHook("onClose", async () => {
+    await shutdownApiTelemetry();
     await closePool();
   });
 

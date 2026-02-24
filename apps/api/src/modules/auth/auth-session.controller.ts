@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Patch,
   Req,
@@ -175,6 +176,24 @@ async function upsertOnboardingState(params: {
   };
 }
 
+async function assertWorkspaceMember(userId: string, workspaceId: string) {
+  const result = await getPool().query<{ exists: boolean }>(
+    `
+      SELECT EXISTS (
+        SELECT 1
+        FROM workspace_members
+        WHERE workspace_id = $1
+          AND user_id = $2
+      ) AS exists;
+    `,
+    [workspaceId, userId]
+  );
+
+  if (!result.rows[0]?.exists) {
+    throw new ForbiddenException("Workspace access denied");
+  }
+}
+
 @Controller("auth")
 export class AuthSessionController {
   @Get("session")
@@ -219,9 +238,14 @@ export class AuthSessionController {
             : new Date()
           : null;
 
+    const workspaceId = parsed.data.workspaceId ?? existing.workspaceId;
+    if (workspaceId) {
+      await assertWorkspaceMember(userId, workspaceId);
+    }
+
     const onboarding = await upsertOnboardingState({
       userId,
-      workspaceId: parsed.data.workspaceId ?? existing.workspaceId,
+      workspaceId,
       steps: mergedSteps,
       completedAt
     });

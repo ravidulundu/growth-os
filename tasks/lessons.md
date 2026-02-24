@@ -74,6 +74,9 @@
 - Next.js `/api/*` 500’lerinde her zaman önce backend health’i doğrula; API down ise hata uygulama mantığından değil web rewrite/proxy katmanından gelir.
 - Runtime komutu verirken kullanıcıda `pnpm` PATH olmayabileceğini varsay; uzun loop komutlarını `corepack pnpm ...` formunda vererek `command not found` döngüsünü engelle.
 - Worker testlerinde `src/main.ts` importu top-level BullMQ/PG handle açıyorsa testler bitince süreç kapanmayabilir; test için explicit `closeWorkerRuntimeResourcesForTests()` helper export edip `after()` içinde kapat.
+- PR thread cleanup turunda sadece kod fixlemek yeterli değil; aynı turda thread bazlı teknik reply + `resolveReviewThread` + `pnpm pr:review-check` sıfır doğrulaması zorunlu.
+- Devin/Copilot review yorumlarında `ANALYSIS/INFO` olanları da “geçmek” yerine ya kodla iyileştir ya da neden bilinçli no-op bıraktığını thread’e açık yaz; aksi halde unresolved borcu birikir.
+- Next.js dev ortaminda `localhost` ve `127.0.0.1` karisik kullaniliyorsa `allowedDevOrigins` ile her iki origini de explicit tanimla; ileride major surumde bu uyari zorunlu ayara donusecek.
 
 ## 2026-02-24
 
